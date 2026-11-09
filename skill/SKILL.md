@@ -1,6 +1,6 @@
 ---
 name: patent-abnormal-screening
-description: Use when the user supplies Chinese patent application text (PDF 公开文本 or Word 正文) and asks whether it is 非正常申请 (abnormal filing) under CNIPA Order No.77 — 判断"正常/非正常""非正常申请""77号令筛查"时。v2 全维度：申请人资质与研发能力、发明人件数（剔重名）、申请人一致性、跨机构申请、代理师代理量、技术领域、撰写、多件相似、违法公德；含专精特新豁免。外部取数先查本地 cache，不重复花额度。
+description: Use when the user supplies Chinese patent application text (PDF 公开文本 or Word 正文) and asks whether it is 非正常申请 (abnormal filing) under CNIPA Order No.77 — 判断"正常/非正常""非正常申请""77号令筛查"时。v2 全维度：申请人资质与研发能力、发明人件数（剔重名）、跨机构申请（含原⑤b）、代理师代理量、技术领域、撰写、多件相似、违法公德；含专精特新豁免。外部取数先查本地 cache，不重复花额度。
 ---
 
 # 专利非正常申请筛查（v2）
