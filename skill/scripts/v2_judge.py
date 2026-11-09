@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+"""v2 单案判定：把 rules/ 的逻辑串起来，输出 dims + 结论 + 证据。
+
+文本维（③④⑥违法）不在本文件算，由调用方传入（v1 判过就直接复用，口径没变）。
+"""
+from __future__ import annotations
+
+import datetime as dt
+
+import v2_fetch as F
+import v2_rules as R
+
+
+def judge(case: dict, text_dims: dict | None = None, verbose: bool = False) -> dict:
+    """
+    case:
+      title, applicant, first_inventor, inventors[list], agent,
+      ipc(可空), app_date(可空 'YYYY-MM-DD'), main_match('pass'|'fail'|'pending'),
+      type_check / tech_attr 可空（默认沿用 text_dims 或按名称启发式）
+    """
+    text_dims = text_dims or {}
+    ev = {}
+    dims = {}
+
+    # ---------- 第 1 步：前置资质（豁免）
+    h = F.honor(case["applicant"])
+    w = F.waiver_from(h)
+    if w:
+        ev["豁免依据"] = f"{w['level']}（{w['year']} 年认定）"
+    elif not h.get("_ok"):
+        ev["豁免依据"] = "资质未取到 → 企业类维度按正常判"
+
+    # ---------- 企业类（①四项）
+    reg = F.company_reg(case["applicant"])
+    dims["①类型"] = case.get("type_check") or text_dims.get("①类型") or "pending"
+    dims["①科技属性"] = case.get("tech_attr") or text_dims.get("①科技属性") or "pending"
+    dims["①社保"] = "fail" if (reg.get("insured") or 0) < R.T["social_fail"] else "pass"
+    dims["①主营匹配"] = case.get("main_match") or text_dims.get("①主营匹配") or "pending"
+    ev["①社保"] = f"参保 {reg.get('insured')} 人（企查查 {reg.get('_fetched') or ''}）"
+
+    # ---------- 第 5 步：发明人（剔重名 → 计数 → 1.1 兜底）
+    inv = F.inventor_records(case["first_inventor"])
+    dd = R.dedupe(inv.get("records") or [], case)
+    kept, dropped, pend = dd["kept"], dd["dropped"], dd["pending"]
+    N = len(kept)
+    ev["计数"] = (f"名口径 {len(inv.get('records') or [])} 件 → 剔除重名 {len(dropped)} 件"
+                  f"{'、待核查 ' + str(len(pend)) + ' 件' if pend else ''} → 有效 {N} 件")
+    if dropped:
+        ev["被剔除"] = [f"{x['app_no']} {x['title']}（{x['reason']}）" for x in dropped][:8]
+
+    if N >= R.T["inventor_min"]:
+        dims["发明人件数"] = "fail"
+        dims["研发能力"] = "na"
+    elif pend and N == 0:
+        dims["发明人件数"] = "pending"
+        dims["研发能力"] = "pending"
+        ev["研发能力"] = "记录全部待核查（缺 IPC 或申请人不同），未转研发能力判定"
+    else:
+        dims["发明人件数"] = "pass"
+        base = (case.get("app_date") or "").replace("-", "") or dt.date.today().strftime("%Y%m%d")
+        rd = F.granted_inventions(case["applicant"], base)
+        dims["研发能力"] = "pass" if rd.get("has") else ("fail" if rd.get("has") is False else "pending")
+        ev["研发能力"] = (f"到基准日 {base} 授权发明专利 {rd.get('granted_invention')} 件"
+                          f"（基准：{'本案申请日' if case.get('app_date') else '查询日（本案无申请日）'}）")
+
+    # ---------- ⑤b（沿用 v1 结论）
+    dims["⑤b一致性"] = text_dims.get("⑤b一致性") or text_dims.get("⑤b") or "pending"
+
+    # ---------- 第 6 步：2.1 跨机构（复用 kept 集合）
+    apps = [case["applicant"]]
+    for x in kept:
+        apps.extend(x.get("applicants") or [])
+    apps = list(dict.fromkeys(apps))
+    info = {}
+    for a in apps:
+        if a == case["applicant"]:
+            info[a] = {"legal_rep": reg.get("legal_rep") or "", "address": reg.get("address") or ""}
+        else:
+            rr = F.company_reg(a)
+            info[a] = {"legal_rep": rr.get("legal_rep") or "", "address": rr.get("address") or ""}
+    grp = R.group_applicants(apps, info) if len(apps) > 1 else {"groups": [apps] if apps else [], "edges": []}
+    if len(apps) <= 1:
+        dims["跨机构"] = "na"
+    else:
+        dims["跨机构"] = "fail" if len(grp["groups"]) >= R.T["cross_org_min"] else "pass"
+    ev["跨机构"] = {"申请人数": len(apps), "组数": len(grp["groups"]),
+                    "分组": grp["groups"],
+                    "关联依据": [f"{a}↔{b}：{why}" for a, b, why in grp["edges"]]}
+
+    # ---------- 第 7 步：② 代理师
+    if not case.get("agent"):
+        dims["②代理量"] = "pending"
+        ev["②代理量"] = "未提供代理师"
+    else:
+        ag = F.agent_rolling(case["agent"])
+        if ag.get("status") != "ok":
+            dims["②代理量"] = "pending"
+            ev["②代理量"] = "该所名录查无此人 → 待核查"
+        else:
+            dims["②代理量"] = "fail" if ag["value"] >= R.T["agent_fail"] else "pass"
+            ev["②代理量"] = f"本所口径，滚动 12 个月 {ag['value']} 件（{ag['window'][0]} ~ {ag['window'][1]}）"
+
+    # ---------- 文本维（原样带入）
+    for d in ("③技术领域", "④撰写", "⑥多件相似", "违法公德"):
+        dims[d] = text_dims.get(d) or "pending"
+
+    conclusion, hits = R.summarize(dims, w)
+    return {"dims": dims, "conclusion": conclusion, "hits": hits,
+            "waiver": w, "evidence": ev,
+            "detail": {"kept": kept, "dropped": dropped, "pending": pend,
+                       "records_total": len(inv.get("records") or [])}}

@@ -1,0 +1,32 @@
+{
+ "pub": "",
+ "title": "一种对夹式蝶阀",
+ "applicants": [
+  "埃里克阀业（江苏）有限公司"
+ ],
+ "first_inventor": "谢章龙",
+ "other_inventors": "石伟",
+ "app_date": "",
+ "agency": "北京云嘉湃富知识产权代理有限公司",
+ "agent": "刘亮",
+ "conclusion": "非正常",
+ "dims": {
+  "①类型": "pass",
+  "①科技属性": "pass",
+  "①社保": "pass",
+  "①主营匹配": "pass",
+  "②代理量": "pass",
+  "③技术领域": "pass",
+  "④撰写": "pass",
+  "⑤a当年件数": "pass",
+  "⑤b一致性": "fail",
+  "⑥多件相似": "fail",
+  "违法公德": "pass"
+ },
+ "notes": {
+  "来源": "v1 报告快照重建（原 results/batch_20261105_常州 被删，按已出报告事实重建；文本维/①四项结论取自 v1 报告）"
+ },
+ "evidence": {
+  "claim_count": 7
+ }
+}
