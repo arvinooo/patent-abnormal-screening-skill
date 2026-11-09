@@ -110,8 +110,9 @@ AGENT = {
 
 
 def seed():
+    # 回测批的案子都没有申请日 → 锚点=查询日，窗口 2025-11-09 ~ 2026-11-09
     for name, data in INVENTORS.items():
-        F.cache_set("inventor", name, data)
+        F.cache_set("inventor", f"{name}|{data['window_start']}|{data['window_end']}", data)
     for app, n in RD.items():
         F.cache_set("company_rd", f"{app}|{TODAY.replace('-', '')}",
                     {"applicant": app, "granted_invention": n, "has": n >= 1,
@@ -122,7 +123,7 @@ def seed():
                      "zhuanjingtexin": [h for h in hs if "专精特新" in h["name"]],
                      "_fetched": TODAY})
     for ag, d in AGENT.items():
-        F.cache_set("agent_month", ag, {"agent": ag, "status": "ok", "value": d["value"],
+        F.cache_set("agent_month", f"{ag}|{TODAY}", {"agent": ag, "status": "ok", "value": d["value"],
                                         "detail": d["detail"], "window": ["2025-11-10", TODAY],
                                         "as_of": TODAY, "_fetched": TODAY,
                                         "_source": "香橼树月度统计（回测快照）",

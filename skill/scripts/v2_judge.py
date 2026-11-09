@@ -39,7 +39,8 @@ def judge(case: dict, text_dims: dict | None = None, verbose: bool = False) -> d
     ev["①社保"] = f"参保 {reg.get('insured')} 人（企查查 {reg.get('_fetched') or ''}）"
 
     # ---------- 第 5 步：发明人（剔重名 → 计数 → 1.1 兜底）
-    inv = F.inventor_records(case["first_inventor"])
+    anchor = case.get("app_date") or None          # 窗口锚点 = 本案申请日（无则查询日）
+    inv = F.inventor_records(case["first_inventor"], anchor)
     dd = R.dedupe(inv.get("records") or [], case)
     kept, dropped, pend = dd["kept"], dd["dropped"], dd["pending"]
     N = len(kept)
@@ -48,7 +49,21 @@ def judge(case: dict, text_dims: dict | None = None, verbose: bool = False) -> d
     if dropped:
         ev["被剔除"] = [f"{x['app_no']} {x['title']}（{x['reason']}）" for x in dropped][:8]
 
-    if N >= R.T["inventor_min"]:
+    if inv.get("common_name"):
+        # 件数不可采信，但研发能力照样能判：
+        # 若有授权发明 → 件数未定，只能待核查；若没有 → 无论件数多少都不过
+        dims["发明人件数"] = "pending"
+        base = (case.get("app_date") or "").replace("-", "") or dt.date.today().strftime("%Y%m%d")
+        rd = F.granted_inventions(case["applicant"], base)
+        if rd.get("has"):
+            dims["研发能力"] = "pending"
+            ev["研发能力"] = f"常见名（{inv.get('total_raw')} 组）件数不可采信；授权发明 {rd.get('granted_invention')} 件 → 待核查"
+        else:
+            dims["研发能力"] = "fail"
+            ev["研发能力"] = (f"常见名（{inv.get('total_raw')} 组）件数不可采信，但到基准日 {base} 授权发明专利 "
+                              f"{rd.get('granted_invention')} 件 → 无论件数多少都判非正常")
+        ev["计数"] = f"常见名（名下 {inv.get('total_raw')} 组），计数不可采信"
+    elif N >= R.T["inventor_min"]:
         dims["发明人件数"] = "fail"
         dims["研发能力"] = "na"
     elif pend and N == 0:
@@ -63,14 +78,14 @@ def judge(case: dict, text_dims: dict | None = None, verbose: bool = False) -> d
         ev["研发能力"] = (f"到基准日 {base} 授权发明专利 {rd.get('granted_invention')} 件"
                           f"（基准：{'本案申请日' if case.get('app_date') else '查询日（本案无申请日）'}）")
 
-    # ---------- ⑤b（沿用 v1 结论）
-    dims["⑤b一致性"] = text_dims.get("⑤b一致性") or text_dims.get("⑤b") or "pending"
-
     # ---------- 第 6 步：2.1 跨机构（复用 kept 集合）
     apps = [case["applicant"]]
     for x in kept:
         apps.extend(x.get("applicants") or [])
     apps = list(dict.fromkeys(apps))
+    if inv.get("common_name"):
+        dims["跨机构"] = "pending"
+        ev["跨机构"] = f"常见名（名下 {inv.get('total_raw')} 组），机构数不可采信 → 待核查"
     info = {}
     for a in apps:
         if a == case["applicant"]:
@@ -79,8 +94,10 @@ def judge(case: dict, text_dims: dict | None = None, verbose: bool = False) -> d
             rr = F.company_reg(a)
             info[a] = {"legal_rep": rr.get("legal_rep") or "", "address": rr.get("address") or ""}
     grp = R.group_applicants(apps, info) if len(apps) > 1 else {"groups": [apps] if apps else [], "edges": []}
-    if len(apps) <= 1:
-        dims["跨机构"] = "na"
+    if dims.get("跨机构") == "pending":
+        pass
+    elif len(apps) <= 1:
+        dims["跨机构"] = "pass"
     else:
         dims["跨机构"] = "fail" if len(grp["groups"]) >= R.T["cross_org_min"] else "pass"
     ev["跨机构"] = {"申请人数": len(apps), "组数": len(grp["groups"]),
@@ -92,7 +109,7 @@ def judge(case: dict, text_dims: dict | None = None, verbose: bool = False) -> d
         dims["②代理量"] = "pending"
         ev["②代理量"] = "未提供代理师"
     else:
-        ag = F.agent_rolling(case["agent"])
+        ag = F.agent_rolling(case["agent"], anchor)
         if ag.get("status") != "ok":
             dims["②代理量"] = "pending"
             ev["②代理量"] = "该所名录查无此人 → 待核查"

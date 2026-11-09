@@ -98,19 +98,26 @@ def mcp(expr: str, max_results: int = 1000) -> dict:
 
 # ---------------------------------------------------------------- 发明人记录（12 个月）
 
-def window(today: dt.date | None = None) -> tuple[str, str]:
-    today = today or dt.date.today()
-    start = today - dt.timedelta(days=365)
-    return start.strftime("%Y%m%d"), today.strftime("%Y%m%d")
+def window(anchor: str | dt.date | None = None) -> tuple[str, str]:
+    """窗口 = 锚点往前 12 个月。锚点默认"="本案申请日"，没有申请日则用查询日。"""
+    if isinstance(anchor, str) and anchor:
+        d = dt.date.fromisoformat(anchor[:10].replace("/", "-")) if "-" in anchor[:10] else \
+            dt.date(int(anchor[:4]), int(anchor[4:6]), int(anchor[6:8]))
+    elif isinstance(anchor, dt.date):
+        d = anchor
+    else:
+        d = dt.date.today()
+    start = d - dt.timedelta(days=365)
+    return start.strftime("%Y%m%d"), d.strftime("%Y%m%d")
 
 
-def inventor_records(name: str, today: dt.date | None = None) -> dict:
-    """滚动 12 个月、不论位次、按申请号去重；records 里补 ipc（浏览器结果表）。"""
-    hit = cache_get("inventor", name, max_age=7)
-    if hit and hit.get("window_end") == (today or dt.date.today()).strftime("%Y%m%d"):
+def inventor_records(name: str, anchor: str | dt.date | None = None) -> dict:
+    """滚动 12 个月（锚=本案申请日）、不论位次、按申请号去重；records 补 ipc。"""
+    s, e = window(anchor)
+    key = f"{name}|{s}|{e}"
+    hit = cache_get("inventor", key, max_age=7)
+    if hit:
         return hit
-
-    s, e = window(today)
     expr = f"IN:({name}) AND APD:[{s} TO {e}]"
     sc = mcp(expr, max_results=1000)
     recs, total = [], sc.get("total") or 0
@@ -144,9 +151,10 @@ def inventor_records(name: str, today: dt.date | None = None) -> dict:
                 r.setdefault("ipc", "")
 
     out = {"inventor": name, "expr": expr, "window_start": s, "window_end": e,
-           "total_raw": total, "records": uniq,
+           "anchor": e, "total_raw": total, "records": uniq,
+           "common_name": total > 1000,
            "_fetched": dt.date.today().isoformat(), "_source": "mcp+bsk"}
-    cache_set("inventor", name, out)
+    cache_set("inventor", key, out)
     return out
 
 
@@ -244,10 +252,18 @@ def company_reg(app: str) -> dict:
 
 # ---------------------------------------------------------------- 代理师滚动 12 个月
 
-def agent_rolling(name: str, today: dt.date | None = None) -> dict:
-    today = today or dt.date.today()
-    hit = cache_get("agent_month", name, max_age=1)
-    if hit and hit.get("as_of") == today.isoformat():
+def agent_rolling(name: str, anchor: str | dt.date | None = None) -> dict:
+    """代理量窗口同样锚本案申请日（往前 12 个月）。"""
+    if isinstance(anchor, str) and anchor:
+        today = dt.date.fromisoformat(anchor[:10]) if "-" in anchor[:10] else \
+            dt.date(int(anchor[:4]), int(anchor[4:6]), int(anchor[6:8]))
+    elif isinstance(anchor, dt.date):
+        today = anchor
+    else:
+        today = dt.date.today()
+    key = f"{name}|{today.isoformat()}"
+    hit = cache_get("agent_month", key, max_age=1)
+    if hit:
         return hit
     years = sorted({today.year, (today - dt.timedelta(days=365)).year})
     data = B.agent_months([(name, str(y)) for y in years])
@@ -263,7 +279,7 @@ def agent_rolling(name: str, today: dt.date | None = None) -> dict:
     if not months:
         out = {"agent": name, "status": "not_found", "value": None,
                "as_of": today.isoformat(), "_fetched": today.isoformat()}
-        cache_set("agent_month", name, out)
+        cache_set("agent_month", key, out)
         return out
 
     prev = today - dt.timedelta(days=365)
@@ -278,5 +294,5 @@ def agent_rolling(name: str, today: dt.date | None = None) -> dict:
     out = {"agent": name, "status": "ok", "value": total, "detail": detail,
            "window": [prev.isoformat(), today.isoformat()],
            "as_of": today.isoformat(), "_fetched": today.isoformat(), "_source": "香橼树月度统计"}
-    cache_set("agent_month", name, out)
+    cache_set("agent_month", key, out)
     return out
