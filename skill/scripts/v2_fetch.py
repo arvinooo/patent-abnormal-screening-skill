@@ -296,3 +296,143 @@ def agent_rolling(name: str, anchor: str | dt.date | None = None) -> dict:
            "as_of": today.isoformat(), "_fetched": today.isoformat(), "_source": "香橼树月度统计"}
     cache_set("agent_month", key, out)
     return out
+
+
+# ---------------------------------------------------------------- ③ 创新度：对比文件检索（v2.1）
+
+def mcp_tool(name: str, arguments: dict, retries: int = 6) -> dict:
+    """通用 MCP 工具调用（expression_search / semantic_patent_search / patent_claims…）。"""
+    key = open(KEY_FILE, encoding="utf-8").read().strip()
+    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                       "params": {"name": name, "arguments": arguments}},
+                      ensure_ascii=False).encode()
+    req = urllib.request.Request("https://mcp.mindflow.cn/api/mcp", data=body, method="POST",
+                                 headers={"Authorization": "Bearer " + key,
+                                          "Content-Type": "application/json",
+                                          "Accept": "application/json, text/event-stream"})
+    for attempt in range(retries):
+        try:
+            raw = urllib.request.urlopen(req, timeout=300).read().decode()
+            res = json.loads(re.search(r"data: (\{.*\})", raw, re.S).group(1))["result"]
+            if not res.get("isError"):
+                return res["structuredContent"]
+            txt = (res.get("content") or [{}])[0].get("text", "")
+            if "rate" in txt.lower():
+                time.sleep(4 + 2 * attempt)
+                continue
+            return {"error": txt[:300]}
+        except Exception:
+            time.sleep(5)
+    return {"error": "retry exhausted"}
+
+
+def _pub_date(r: dict) -> str:
+    return str(r.get("publication_date") or r.get("application_date") or "")[:10]
+
+
+def prior_art(queries: list[str], semantic: str | None = None,
+              before: str | None = None, limit: int = 8,
+              keywords: list[str] | None = None) -> dict:
+    """③ 创新度取数：布尔检索 + 语义检索两路，合并去重，只留早于本案的文件。
+
+    queries  : 布尔检索式列表（含精确组 + 上位组，见 rules/50 §3b）
+    semantic : 语义检索输入（独权原文 + 创新点清单）
+    before   : 本案申请日（YYYY-MM-DD）；无申请日传查询日
+    """
+    import hashlib
+    before = (before or dt.date.today().isoformat())[:10]
+    bkey = before.replace("-", "")
+    sig = hashlib.md5(json.dumps([sorted(queries), semantic, bkey], ensure_ascii=False)
+                      .encode()).hexdigest()
+    hit = cache_get("prior_art", sig, max_age=7)
+    if hit:
+        if "all_candidates" in hit:                       # 缓存里存全量，返回时再排序截断
+            return _rank_prior(hit, keywords, limit)
+        return hit
+
+    cands, routes, errors = {}, [], []
+    for q in queries:
+        sc = mcp(q, max_results=30)
+        if sc.get("error"):
+            errors.append(f"布尔 {q}: {sc['error']}")
+            continue
+        routes.append(f"布尔 {q}（{sc.get('total')} 篇）")
+        for r in sc.get("records") or []:
+            p = str(r.get("publication_number") or "")
+            if not p:
+                continue
+            cands.setdefault(p, {
+                "pub": p, "app_no": r.get("application_number"),
+                "app_date": r.get("application_date"), "pub_date": r.get("publication_date"),
+                "title": r.get("title"),
+                "applicants": list(dict.fromkeys((r.get("current_applicants") or [])
+                                                 + (r.get("original_applicants") or []))),
+                "_route": ["布尔"]})
+
+    if semantic:
+        sc = mcp_tool("semantic_patent_search", {"query": semantic, "max_results": 10})
+        if sc.get("error"):
+            errors.append(f"语义: {sc['error']}")
+        else:
+            routes.append("语义 semantic_patent_search")
+            for r in sc.get("records") or []:
+                p = str(r.get("publication_number") or "")
+                if not p:
+                    continue
+                e = cands.setdefault(p, {
+                    "pub": p, "app_no": r.get("application_number"),
+                    "app_date": r.get("application_date"), "pub_date": r.get("publication_date"),
+                    "title": r.get("title"),
+                    "applicants": list(dict.fromkeys((r.get("current_applicants") or [])
+                                                     + (r.get("original_applicants") or [])))})
+                e.setdefault("_route", []).append("语义")
+
+    # 只看早于本案的文件（申请日或公开日早于 before）
+    keep = [c for c in cands.values()
+            if (_pub_date(c) and _pub_date(c) < before) or
+               (str(c.get("app_date") or "")[:10] and str(c.get("app_date"))[:10] < before)]
+
+    out = {"before": before, "queries": queries, "semantic": bool(semantic),
+           "routes": routes, "all_candidates": keep, "candidates": keep[:limit],
+           "candidates_total": len(keep), "errors": errors,
+           "_fetched": dt.date.today().isoformat(), "_source": "mindflow(mcp)"}
+    if routes:  # 至少有一路成功才缓存
+        cache_set("prior_art", sig, out)
+    return _rank_prior(out, keywords, limit)
+
+
+def _rank_prior(out: dict, keywords: list[str] | None, limit: int) -> dict:
+    """排序：语义命中优先，其次标题命中领域关键词数，再按公开日早的靠前。"""
+    kws = [k for k in (keywords or []) if k]
+    scored = []
+    for c in out.get("all_candidates") or out.get("candidates") or []:
+        t = c.get("title") or ""
+        score = 3 * ("语义" in (c.get("_route") or [])) + 2 * sum(1 for k in kws if k in t)
+        scored.append((score, _pub_date(c), c))
+    scored.sort(key=lambda x: (-x[0], x[1] or "9999"))
+    res = dict(out)
+    res["candidates"] = [c for _, _, c in scored[:limit]]
+    res["ranked_by"] = "语义命中>标题关键词>公开日"
+    return res
+
+
+def prior_claims(pubs: list[str]) -> dict:
+    """取对比文件的权利要求原文（10 积分/篇，批量上限 100）。"""
+    pubs = [p for p in dict.fromkeys(pubs) if p]
+    if not pubs:
+        return {"claims": {}, "errors": ["no pubs"]}
+    cache_all = _load("prior_claims")
+    need = [p for p in pubs if p not in cache_all]
+    if need:
+        sc = mcp_tool("patent_claims", {"publication_numbers": need[:100]})
+        for r in (sc.get("records") or []):
+            p = str(r.get("publication_number") or "")
+            if not p:
+                continue
+            cl = r.get("claims") or []
+            txt = "\n".join(cl) if isinstance(cl, list) else str(cl)
+            cache_all[p] = {"pub": p, "title": r.get("title"), "claims_text": txt,
+                            "_fetched": dt.date.today().isoformat()}
+        _save("prior_claims", cache_all)
+    got = {p: cache_all[p] for p in pubs if p in cache_all}
+    return {"claims": got, "missing": [p for p in pubs if p not in cache_all]}

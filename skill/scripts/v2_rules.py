@@ -19,7 +19,16 @@ T = {
     "window_days": 365,        # 滚动窗口
     "ipc_same": 4,             # 一致：IPC 主分类前 4 位
     "ipc_similar": 3,          # 相似：前 3 位
+    # ---- v2.1 ③ 创新度（对应 rules/00 T08 / T10–T12）
+    "novelty_fail": 0.80,      # T10 单篇覆盖度 ≥80% 且差异为常见替换/公知常识 → 不过
+    "novelty_full": 1.00,      # T11 单篇 100% → 不过
+    "combo_full": 1.00,        # T12 ≤2 篇合并 100% 且无协同 → 不过
+    "algo_ratio": 0.80,        # T08 计算机算法：计算类特征占比 ≥80%
 }
+
+# 差异定性（rules/50 §3b 第 3 步）
+DIFF_SIMPLE = {"常见替换", "公知常识"}          # 简单替换 / 公知常识
+DIFF_SUBSTANTIVE = {"实质改进", "协同"}          # 有实质差异
 
 # 常见名不作身份锚（rules/20 §2.2）
 COMMON_NAMES = {
@@ -196,3 +205,59 @@ def summarize(dims: dict, waiver: dict | None) -> tuple[str, list[str]]:
     if pending:
         return "待核查", []
     return "正常", []
+
+
+# ---------------------------------------------------------------- v2.1 ③ 创新度
+
+
+def hard_category(flags: dict) -> tuple[str, str]:
+    """③ §3a 两类红线。flags 由调用方按规则读文本后填：
+
+    consumer / industrial_use / only_form / ipc_consumer —— 生活类四项
+    method_only / calc_ratio / has_hardware / pure_calc_effect —— 算法四项
+    """
+    if (flags.get("consumer") and not flags.get("industrial_use")
+            and flags.get("only_form") and flags.get("ipc_consumer")):
+        return "fail", "生活类发明创造（消费品+非生产场景+仅形态便利改进+消费类IPC）"
+    if (flags.get("method_only") and (flags.get("calc_ratio") or 0) >= T["algo_ratio"]
+            and not flags.get("has_hardware") and flags.get("pure_calc_effect")):
+        return "fail", (f"计算机算法（纯方法/模型、计算类特征 {flags.get('calc_ratio'):.0%}、"
+                        "无硬件执行体、效果为纯计算指标）")
+    return "pass", ""
+
+
+def novelty(coverage: float, diff: str, combined: float | None = None,
+            refs: int = 1, self_repeat: bool = False,
+            closest: str = "") -> tuple[str, str]:
+    """③ §3b 第 4 步。coverage=单篇覆盖度(0-1)；diff=常见替换/公知常识/实质改进/协同；
+    combined ≤2 篇合并覆盖度；self_repeat=最接近文件是本案申请人的在先申请。"""
+    cov = float(coverage or 0)
+    whom = f"最接近 {closest}，" if closest else ""
+    if cov >= T["novelty_full"]:
+        return "fail", f"{whom}单篇覆盖度 {cov:.0%}（100%，X 类全文命中）"
+    if self_repeat and cov >= T["novelty_fail"]:
+        return "fail", f"{whom}本案申请人的在先申请，覆盖度 {cov:.0%} → 自我重复申请"
+    if cov >= T["novelty_fail"] and diff in DIFF_SIMPLE:
+        return "fail", (f"{whom}单篇覆盖度 {cov:.0%}（≥80%），剩余差异属「{diff}」→ 创新度不足")
+    if (combined is not None and combined >= T["combo_full"] and refs <= 2
+            and diff != "协同"):
+        return "fail", (f"{refs} 篇合并覆盖 {combined:.0%}（100%），无协同 → 要素简单拼凑")
+    return "pass", (f"{whom}单篇覆盖度 {cov:.0%}，差异属「{diff or '未定性'}」"
+                    + (f"，合并 {combined:.0%}" if combined is not None else "")
+                    + " → 创新度够")
+
+
+def coverage_table(features: list[str], refs: dict) -> dict:
+    """生成逐特征对照表：features=F1..Fn；refs={公开号: {对应特征下标或 F 编号}}。
+
+    返回 {pub: {"k": n, "N": N, "ratio": float, "hit": [...], "miss": [...]}} 与合并覆盖。
+    """
+    N = len(features) or 1
+    per, union = {}, set()
+    for pub, hit in (refs or {}).items():
+        hs = {str(x) for x in (hit or [])}
+        hit_f = [f for f in features if f in hs]
+        union |= set(hit_f)
+        per[pub] = {"k": len(hit_f), "N": N, "ratio": len(hit_f) / N,
+                    "hit": hit_f, "miss": [f for f in features if f not in hs]}
+    return {"per": per, "combined": len(union) / N, "combined_hit": sorted(union)}

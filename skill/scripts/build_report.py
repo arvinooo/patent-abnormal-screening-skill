@@ -120,6 +120,12 @@ def fail_pubs(cases, dim):
 AGENT_DATE = "取数日未记"
 
 
+def _clip_title(t, n=22):
+    """对比文件标题：去掉末尾括号注释，过长截断。"""
+    t = re.sub(r"（[^）]*）\s*$", "", (t or "").strip())
+    return t[:n]
+
+
 def _v2_extra(c, add):
     """v2 专属证据块：豁免 / 计数过程 / 跨机构分组。"""
     w = c.get("waiver")
@@ -137,6 +143,29 @@ def _v2_extra(c, add):
         add("- **跨机构**：申请人 %d 家 → 聚组 %d 组%s"
             % (x.get("applicants", 0), x.get("groups", 0),
                ("；关联： " + "、".join(x.get("edges") or [])) if x.get("edges") else ""))
+    nv = c.get("v2_novelty")
+    if nv:
+        add("- **③ 创新度**：特征 N=%s；两类红线：%s"
+            % (nv.get("N"), nv.get("redline") or "未命中"))
+        refs = nv.get("refs") or []
+        feats = nv.get("features") or []
+        if feats:
+            add("")
+            add("| 特征 | 内容 | " + " | ".join(r["pub"] for r in refs) + " |")
+            add("|---" * (2 + len(refs)) + "|")
+            for f in feats:
+                cells = [f.get("id", ""), f.get("text", "")]
+                for r in refs:
+                    cells.append("✔" if f.get("id") in (r.get("hit") or []) else "✘")
+                add("| " + " | ".join(str(x) for x in cells) + " |")
+            add("")
+        for r in refs:
+            add("  - %s（%s，%s）覆盖 %s/%s＝%.0f%%，差异：%s"
+                % (r["pub"], r.get("pub_date", ""), _clip_title(r.get("title")),
+                   r.get("k"), nv.get("N"), 100.0 * float(r.get("ratio") or 0), r.get("diff", "—")))
+        add("  - 合并覆盖度 %.0f%%；差异定性：%s → **%s**"
+            % (100.0 * float(nv.get("combined") or 0), nv.get("diff", "—"),
+               "创新度不足" if nv.get("verdict") == "fail" else "创新度够"))
 
 
 def build_md(cases, batch, out_base, stat, concl, combos, multi, dims_=None):
@@ -481,6 +510,20 @@ def build_pdf(cases, batch, out_base, stat, concl, combos, multi, dims_=None):
         x2 = c.get("v2_cross_org")
         if x2:
             p("  · 跨机构：申请人 %d 家 → 聚组 %d 组" % (x2.get("applicants", 0), x2.get("groups", 0)))
+        nv = c.get("v2_novelty")
+        if nv:
+            p("  · ③ 创新度：特征 N=%s；红线：%s" % (nv.get("N"), nv.get("redline") or "未命中"))
+            for r in (nv.get("refs") or []):
+                p("    - 对比 %s（%s，%s）覆盖 %s/%s＝%.0f%%，差异：%s"
+                  % (r["pub"], r.get("pub_date", ""), _clip_title(r.get("title")),
+                     r.get("k"), nv.get("N"), 100.0 * float(r.get("ratio") or 0), r.get("diff", "—")))
+            for f in (nv.get("features") or []):
+                hit = [r["pub"] for r in (nv.get("refs") or []) if f.get("id") in (r.get("hit") or [])]
+                p("    · %s %s → %s" % (f.get("id"), f.get("text", ""),
+                                        ("公开于 " + "、".join(hit)) if hit else "未公开"))
+            p("    → 合并覆盖度 %.0f%%，差异定性：%s，判定：%s"
+              % (100.0 * float(nv.get("combined") or 0), nv.get("diff", "—"),
+                 "创新度不足" if nv.get("verdict") == "fail" else "创新度够"))
         pdf.ln(1)
 
     if batch.get("sources"):
