@@ -144,9 +144,12 @@ def _v2_extra(c, add):
             % (x.get("applicants", 0), x.get("groups", 0),
                ("；关联： " + "、".join(x.get("edges") or [])) if x.get("edges") else ""))
     nv = c.get("v2_novelty")
-    if nv:
-        add("- **③ 创新度**：特征 N=%s；两类红线：%s"
-            % (nv.get("N"), nv.get("redline") or "未命中"))
+    if nv and nv.get("skipped"):
+        add("- **③ 归类**：归「%s」，按 rules/50 §3b 不看创新度（未触发创新度）；%s"
+            % (nv.get("category", "非四类"), nv.get("skip_reason") or ""))
+    elif nv:
+        add("- **③ 归类／创新度**：归「%s」；特征 N=%s"
+            % (nv.get("category", "—"), nv.get("N")))
         refs = nv.get("refs") or []
         feats = nv.get("features") or []
         if feats:
@@ -511,8 +514,11 @@ def build_pdf(cases, batch, out_base, stat, concl, combos, multi, dims_=None):
         if x2:
             p("  · 跨机构：申请人 %d 家 → 聚组 %d 组" % (x2.get("applicants", 0), x2.get("groups", 0)))
         nv = c.get("v2_novelty")
-        if nv:
-            p("  · ③ 创新度：特征 N=%s；红线：%s" % (nv.get("N"), nv.get("redline") or "未命中"))
+        if nv and nv.get("skipped"):
+            p("  · ③ 归类：归「%s」，按 rules/50 §3b 不看创新度（未触发创新度）；%s"
+              % (nv.get("category", "非四类"), nv.get("skip_reason") or ""))
+        elif nv:
+            p("  · ③ 归类／创新度：归「%s」；特征 N=%s" % (nv.get("category", "—"), nv.get("N")))
             for r in (nv.get("refs") or []):
                 p("    - 对比 %s（%s，%s）覆盖 %s/%s＝%.0f%%，差异：%s"
                   % (r["pub"], r.get("pub_date", ""), _clip_title(r.get("title")),

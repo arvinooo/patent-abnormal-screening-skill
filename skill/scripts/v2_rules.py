@@ -210,20 +210,55 @@ def summarize(dims: dict, waiver: dict | None) -> tuple[str, list[str]]:
 # ---------------------------------------------------------------- v2.1 ③ 创新度
 
 
-def hard_category(flags: dict) -> tuple[str, str]:
-    """③ §3a 两类红线。flags 由调用方按规则读文本后填：
+CATEGORY_STATUS = {
+    "生活类": "fail",          # T08 红线
+    "计算机算法": "fail",       # T08 红线
+    "机械装置": "novelty",      # 转 T10–T12
+    "方法步骤图的系统": "novelty",  # 转 T10–T12
+    "非四类": "pass",           # 直接过，不看创新度
+}
 
-    consumer / industrial_use / only_form / ipc_consumer —— 生活类四项
-    method_only / calc_ratio / has_hardware / pure_calc_effect —— 算法四项
+
+def category_of(flags: dict) -> tuple[str, str]:
+    """③ §3a 归四类。flags 由调用方读权1+技术领域段后填：
+
+    生活类：consumer / industrial_use / only_form / ipc_consumer
+    计算机算法：method_only / calc_ratio / has_hardware / pure_calc_effect
+    机械装置：mechanical
+    方法步骤图：step_chart
     """
     if (flags.get("consumer") and not flags.get("industrial_use")
             and flags.get("only_form") and flags.get("ipc_consumer")):
-        return "fail", "生活类发明创造（消费品+非生产场景+仅形态便利改进+消费类IPC）"
+        return "生活类", "消费品+非生产场景+仅形态便利改进+消费类IPC"
     if (flags.get("method_only") and (flags.get("calc_ratio") or 0) >= T["algo_ratio"]
             and not flags.get("has_hardware") and flags.get("pure_calc_effect")):
-        return "fail", (f"计算机算法（纯方法/模型、计算类特征 {flags.get('calc_ratio'):.0%}、"
-                        "无硬件执行体、效果为纯计算指标）")
-    return "pass", ""
+        return "计算机算法", (f"纯方法/模型、计算类特征 {flags.get('calc_ratio'):.0%}、"
+                            "无硬件执行体、效果为纯计算指标")
+    if flags.get("mechanical"):
+        return "机械装置", "方案主体为机械结构/装置，创新点在部件结构与连接关系"
+    if flags.get("step_chart"):
+        return "方法步骤图的系统", "权1 为流程步骤序列，各步无装置/工艺参数支撑"
+    return "非四类", ""
+
+
+def tech_dim(category: str, novelty_result: tuple[str, str] | None = None) -> tuple[str, str]:
+    """③ §3b 分流：非四类直接过；生活类/算法不过；机械装置/方法步骤图看 novelty() 结果。"""
+    st = CATEGORY_STATUS.get(category, "pass")
+    if st == "pass":
+        return "pass", f"归「{category}」，按规则不看创新度"
+    if st == "fail":
+        return "fail", f"归「{category}」→ T08 红线，一票不过"
+    if not novelty_result:
+        return "pending", f"归「{category}」，需跑 3c 创新度（检索未完成）"
+    return novelty_result
+
+
+def hard_category(flags: dict) -> tuple[str, str]:
+    """兼容旧调用：只回答红线两类是否命中（不再含机械装置/方法步骤图）。"""
+    cat, why = category_of(flags)
+    if CATEGORY_STATUS.get(cat) == "fail":
+        return "fail", f"{cat}（{why}）"
+    return "pass",
 
 
 def novelty(coverage: float, diff: str, combined: float | None = None,
