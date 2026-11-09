@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# 运行缓存（skill 用 ./cache 存外部取数结果，不进库）
+cache/
+*.json.gz
+
+# 临时/导出
+*.log
+*.tmp
+~$*
+Thumbs.db
+.DS_Store
