@@ -33,15 +33,24 @@ DIMS = [
     "⑤a当年件数", "⑤b一致性",
     "⑥多件相似", "违法公德",
 ]
+# v2 维度（识别到案件里有"研发能力"就用这一套；否则沿用 v1）
+DIMS_V2 = [
+    "①类型", "①科技属性", "①社保", "①主营匹配", "研发能力",
+    "发明人件数", "跨机构", "②代理量",
+    "③技术领域", "④撰写", "⑥多件相似", "违法公德",
+]
+
 HEAD_SHORT = {  # 逐案表列名
     "①类型": "①类型", "①科技属性": "①科技", "①社保": "①社保", "①主营匹配": "①主营",
     "②代理量": "②代理", "③技术领域": "③领域", "④撰写": "④撰写",
     "⑤a当年件数": "⑤a", "⑤b一致性": "⑤b", "⑥多件相似": "⑥相似", "违法公德": "违法",
+    # v2
+    "研发能力": "研发", "发明人件数": "件数", "跨机构": "跨机构",
 }
 SHORT = {  # 逐案表里的单字标记
-    "pass": "过", "fail": "挂", "pending": "待", "na": "—",
+    "pass": "过", "fail": "挂", "pending": "待", "na": "—", "waived": "豁",
 }
-LONG = {"pass": "过", "fail": "不过", "pending": "待核查", "na": "不适用"}
+LONG = {"pass": "过", "fail": "不过", "pending": "待核查", "na": "不适用", "waived": "豁免"}
 CONCL = ("非正常", "正常", "待核查")
 
 FONT_CANDIDATES = [
@@ -58,6 +67,14 @@ FONT_CANDIDATES = [
 def label(c):
     """公开号优先；docx 等无著录项时退回专利名称。"""
     return c.get("pub") or c.get("title") or "—"
+
+
+def pick_dims(cases) -> list[str]:
+    """案件里出现 v2 维度就用 DIMS_V2，否则用 v1 的 DIMS。"""
+    keys = set()
+    for c in cases:
+        keys.update((c.get("dims") or {}).keys())
+    return DIMS_V2 if "研发能力" in keys else DIMS
 
 
 def load_cases(cases_dir):
@@ -79,18 +96,19 @@ def load_cases(cases_dir):
     return cases, batch
 
 
-def compute(cases):
-    stat = {d: Counter() for d in DIMS}
+def compute(cases, dims=None):
+    dims = dims or DIMS
+    stat = {d: Counter() for d in dims}
     for c in cases:
-        for d in DIMS:
+        for d in dims:
             stat[d][c["dims"].get(d, "pending")] += 1
     concl = Counter(c["conclusion"] for c in cases)
     combos = Counter()
     for c in cases:
-        fails = tuple(d for d in DIMS if c["dims"].get(d) == "fail")
+        fails = tuple(d for d in dims if c["dims"].get(d) == "fail")
         if fails:
             combos[fails] += 1
-    multi = Counter(len(tuple(d for d in DIMS if c["dims"].get(d) == "fail"))
+    multi = Counter(len(tuple(d for d in dims if c["dims"].get(d) == "fail"))
                     for c in cases if c["conclusion"] == "非正常")
     return stat, concl, combos, multi
 
@@ -102,7 +120,27 @@ def fail_pubs(cases, dim):
 AGENT_DATE = "取数日未记"
 
 
-def build_md(cases, batch, out_base, stat, concl, combos, multi):
+def _v2_extra(c, add):
+    """v2 专属证据块：豁免 / 计数过程 / 跨机构分组。"""
+    w = c.get("waiver")
+    if w:
+        add("- **企业类豁免**：%s（%s 年认定）→ ①类型/①科技/①社保/①主营/研发能力 不参与否决"
+            % (w.get("level", ""), w.get("year", "")))
+    n = c.get("v2_counts")
+    if n:
+        add("- **发明人计数**：名口径 %s 件 → 剔除重名 %s 件 → 有效 %s 件"
+            % (n.get("raw"), n.get("dropped"), n.get("kept")))
+        for x in (n.get("dropped_list") or [])[:6]:
+            add("  - 剔除：%s（%s）" % (x, "见报告明细"))
+    x = c.get("v2_cross_org")
+    if x:
+        add("- **跨机构**：申请人 %d 家 → 聚组 %d 组%s"
+            % (x.get("applicants", 0), x.get("groups", 0),
+               ("；关联： " + "、".join(x.get("edges") or [])) if x.get("edges") else ""))
+
+
+def build_md(cases, batch, out_base, stat, concl, combos, multi, dims_=None):
+    dims_ = dims_ or DIMS
     now = time.strftime("%Y-%m-%d %H:%M")
     n = len(cases)
     L = []
@@ -111,7 +149,7 @@ def build_md(cases, batch, out_base, stat, concl, combos, multi):
     add("# %s\n" % title)
     add("- 生成时间：%s" % now)
     add("- 案件数：%d" % n)
-    add("- 判定口径：全维（%d 项）且门；任一维不过 = 非正常；缺数据 = 待核查" % len(DIMS))
+    add("- 判定口径：全维（%d 项）且门；任一维不过 = 非正常；缺数据 = 待核查；企业类豁免不否决" % len(dims_))
     if batch.get("rules_version"):
         add("- 阈值快照：%s" % batch["rules_version"])
     if batch.get("note"):
@@ -129,12 +167,12 @@ def build_md(cases, batch, out_base, stat, concl, combos, multi):
     add("## 二、各维度命中统计\n")
     add("> 一个案子可能同时挂多项，所以「不过」列的合计会大于非正常件数。")
     add("")
-    add("| 维度 | 不过 | 待核查 | 不适用 | 通过 | 不过率 |")
-    add("|---|---:|---:|---:|---:|---:|")
-    for d in DIMS:
+    add("| 维度 | 不过 | 待核查 | 豁免 | 不适用 | 通过 | 不过率 |")
+    add("|---|---:|---:|---:|---:|---:|---:|")
+    for d in dims_:
         s = stat[d]
-        add("| %s | %d | %d | %d | %d | %.1f%% |"
-            % (d, s["fail"], s["pending"], s["na"], s["pass"],
+        add("| %s | %d | %d | %d | %d | %d | %.1f%% |"
+            % (d, s["fail"], s["pending"], s["waived"], s["na"], s["pass"],
                100.0 * s["fail"] / n if n else 0))
     add("")
 
@@ -163,7 +201,7 @@ def build_md(cases, batch, out_base, stat, concl, combos, multi):
         add("|---|---:|---|")
         for combo, cnt in combos.most_common():
             pubs = [label(c) for c in cases
-                    if tuple(d for d in DIMS if c["dims"].get(d) == "fail") == combo]
+                    if tuple(d for d in dims_ if c["dims"].get(d) == "fail") == combo]
             add("| %s | %d | %s |" % ("＋".join(combo), cnt, "、".join(pubs)))
     else:
         add("无命中项。")
@@ -172,14 +210,14 @@ def build_md(cases, batch, out_base, stat, concl, combos, multi):
         % "，".join("%d 项 %d 件" % (k, v) for k, v in sorted(multi.items())))
 
     add("## 四、逐案总表\n")
-    head = ["#", "公开号/名称", "申请人", "结论"] + [HEAD_SHORT[d] for d in DIMS] + ["命中项"]
+    head = ["#", "公开号/名称", "申请人", "结论"] + [HEAD_SHORT.get(d, d) for d in dims_] + ["命中项"]
     add("| " + " | ".join(head) + " |")
     add("|" + "---|" * len(head))
     for i, c in enumerate(cases, 1):
-        hit = "＋".join(HEAD_SHORT[d] for d in DIMS if c["dims"].get(d) == "fail") or "—"
+        hit = "＋".join(HEAD_SHORT.get(d, d) for d in dims_ if c["dims"].get(d) == "fail") or "—"
         cells = [str(i), label(c), (c.get("applicants") or [""])[0][:22]]
         cells.append(c["conclusion"])
-        cells += [SHORT.get(c["dims"].get(d, "pending"), "?") for d in DIMS]
+        cells += [SHORT.get(c["dims"].get(d, "pending"), "?") for d in dims_]
         cells.append(hit)
         add("| " + " | ".join(cells) + " |")
     add("")
@@ -197,7 +235,7 @@ def build_md(cases, batch, out_base, stat, concl, combos, multi):
     if pend:
         add("### 待核查案件缺什么\n")
         for c in pend:
-            miss = [d for d in DIMS if c["dims"].get(d) == "pending"]
+            miss = [d for d in dims_ if c["dims"].get(d) == "pending"]
             add("- %s：%s" % (label(c), "、".join(miss) or "未注明"))
         add("")
 
@@ -224,7 +262,7 @@ def build_md(cases, batch, out_base, stat, concl, combos, multi):
             % ("、".join(c.get("applicants") or []), c.get("first_inventor", ""),
                c.get("app_date", ""), c["conclusion"]))
         verbose = bool(batch.get("verbose_evidence"))
-        for d in DIMS:
+        for d in dims_:
             st = c["dims"].get(d)
             note = (c.get("notes") or {}).get(d, "—")
             if verbose:
@@ -233,6 +271,7 @@ def build_md(cases, batch, out_base, stat, concl, combos, multi):
                 add("- %s %s：%s" % (d, LONG.get(st, "?"), note))
             elif st in ("fail", "pending"):
                 add("- %s %s：%s" % (d, "不过" if st == "fail" else "待核查", note))
+        _v2_extra(c, add)
         add("")
 
     if batch.get("sources"):
@@ -264,7 +303,8 @@ def _pick_font():
     return None
 
 
-def build_pdf(cases, batch, out_base, stat, concl, combos, multi):
+def build_pdf(cases, batch, out_base, stat, concl, combos, multi, dims_=None):
+    dims_ = dims_ or DIMS
     try:
         from fpdf import FPDF
         from fpdf.enums import XPos, YPos
@@ -319,7 +359,7 @@ def build_pdf(cases, batch, out_base, stat, concl, combos, multi):
                    new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(1)
     p("生成时间 %s｜案件数 %d｜口径：%d 项全维且门，任一维不过＝非正常，缺数据＝待核查"
-      % (now, n, len(DIMS)))
+      % (now, n, len(dims_)))
     if batch.get("rules_version"):
         p("阈值快照：%s" % batch["rules_version"])
     if batch.get("note"):
@@ -334,7 +374,7 @@ def build_pdf(cases, batch, out_base, stat, concl, combos, multi):
     p("一个案子可能同时挂多项，「不过」列合计会大于非正常件数。")
     table(["维度", "不过", "待核查", "不适用", "通过", "不过率"],
           [[d, stat[d]["fail"], stat[d]["pending"], stat[d]["na"], stat[d]["pass"],
-            "%.1f%%" % (100.0 * stat[d]["fail"] / n if n else 0)] for d in DIMS],
+            "%.1f%%" % (100.0 * stat[d]["fail"] / n if n else 0)] for d in dims_],
           widths=(46, 20, 24, 24, 22, 24))
 
     agents = {}
@@ -359,7 +399,7 @@ def build_pdf(cases, batch, out_base, stat, concl, combos, multi):
     if combos:
         table(["命中组合", "件数", "公开号"],
               [[" + ".join(c), k, "、".join(label(cc) for cc in cases
-                                            if tuple(d for d in DIMS
+                                            if tuple(d for d in dims_
                                                      if cc["dims"].get(d) == "fail") == c)]
                for c, k in combos.most_common()], widths=(58, 16, 100), size=8)
     else:
@@ -369,16 +409,16 @@ def build_pdf(cases, batch, out_base, stat, concl, combos, multi):
 
     pdf.add_page(orientation="L")   # 先换页再写标题，避免标题孤零零挂在上一页底部
     h("四、逐案总表")
-    head = ["#", "公开号/名称", "申请人", "结论"] + [HEAD_SHORT[d] for d in DIMS] + ["命中项"]
+    head = ["#", "公开号/名称", "申请人", "结论"] + [HEAD_SHORT.get(d, d) for d in dims_] + ["命中项"]
     rows = []
     for i, c in enumerate(cases, 1):
-        hit = "+".join(HEAD_SHORT[d] for d in DIMS if c["dims"].get(d) == "fail") or "-"
+        hit = "+".join(HEAD_SHORT.get(d, d) for d in dims_ if c["dims"].get(d) == "fail") or "-"
         rows.append([i, label(c), (c.get("applicants") or [""])[0][:16],
                      c["conclusion"]]
-                    + [SHORT.get(c["dims"].get(d, "pending"), "?") for d in DIMS]
+                    + [SHORT.get(c["dims"].get(d, "pending"), "?") for d in dims_]
                     + [hit])
-    # 12.2 * len(DIMS) + 固定列；横排可用约 277mm
-    widths = [7, 27, 30, 13] + [12.2] * len(DIMS) + [45]
+    # 12.2 * len(dims_) + 固定列；横排可用约 277mm
+    widths = [7, 27, 30, 13] + [12.2] * len(dims_) + [45]
     table(head, rows, widths=widths, size=6.8)
 
     pdf.add_page(orientation="P")
@@ -386,7 +426,7 @@ def build_pdf(cases, batch, out_base, stat, concl, combos, multi):
     rev = [c for c in cases if c.get("review")]
     if rev:
         for c in rev:
-            p("· %s（%s）：%s" % (label(c), c["conclusion"], c["review"]))
+            p("· %s（%s）：%s" % (label(c), c["conclusion"], c.get("review") or ""))
     else:
         p("无。")
 
@@ -394,7 +434,7 @@ def build_pdf(cases, batch, out_base, stat, concl, combos, multi):
     if pend:
         h("六、待核查案件缺什么")
         for c in pend:
-            miss = [d for d in DIMS if c["dims"].get(d) == "pending"]
+            miss = [d for d in dims_ if c["dims"].get(d) == "pending"]
             p("· %s：%s" % (label(c), "、".join(miss) or "未注明"))
 
     b5 = [c for c in cases if c["dims"].get("⑤b一致性") == "fail"]
@@ -422,7 +462,7 @@ def build_pdf(cases, batch, out_base, stat, concl, combos, multi):
           % ("、".join(c.get("applicants") or []), c.get("first_inventor", ""),
              c.get("app_date", ""), c["conclusion"]))
         verbose = bool(batch.get("verbose_evidence"))
-        for d in DIMS:
+        for d in dims_:
             st = c["dims"].get(d)
             note = (c.get("notes") or {}).get(d, "—")
             if verbose:
@@ -430,7 +470,17 @@ def build_pdf(cases, batch, out_base, stat, concl, combos, multi):
             elif d in ("②代理量", "⑤a当年件数") and st in ("pass", "fail", "pending"):
                 p("  · %s %s：%s" % (d, LONG.get(st, "?"), note))
             elif st in ("fail", "pending"):
-                p("  · %s %s：%s" % (d, "不过" if st == "fail" else "待核查", note))
+                p("  %s %s：%s" % (d, "不过" if st == "fail" else "待核查", note))
+        w = c.get("waiver")
+        if w:
+            p("  · 企业类豁免：%s（%s 年认定）" % (w.get("level", ""), w.get("year", "")))
+        n2 = c.get("v2_counts")
+        if n2:
+            p("  · 发明人计数：名口径 %s → 剔除 %s → 有效 %s"
+              % (n2.get("raw"), n2.get("dropped"), n2.get("kept")))
+        x2 = c.get("v2_cross_org")
+        if x2:
+            p("  · 跨机构：申请人 %d 家 → 聚组 %d 组" % (x2.get("applicants", 0), x2.get("groups", 0)))
         pdf.ln(1)
 
     if batch.get("sources"):
@@ -470,14 +520,15 @@ def main(argv):
     out = os.path.abspath(a.out)
     os.makedirs(os.path.dirname(out), exist_ok=True)
 
-    stat, concl, combos, multi = compute(cases)
-    build_md(cases, batch, out, stat, concl, combos, multi)
+    dims_ = pick_dims(cases)
+    stat, concl, combos, multi = compute(cases, dims_)
+    build_md(cases, batch, out, stat, concl, combos, multi, dims_)
     print("md  ->", out + ".md")
-    ok, why = build_pdf(cases, batch, out, stat, concl, combos, multi)
+    ok, why = build_pdf(cases, batch, out, stat, concl, combos, multi, dims_)
     print(("pdf -> " + out + ".pdf") if ok else ("pdf 跳过：" + why))
     print("非正常 %d / 正常 %d / 待核查 %d；不过项合计 %d"
           % (concl["非正常"], concl["正常"], concl["待核查"],
-             sum(stat[d]["fail"] for d in DIMS)))
+             sum(stat[d]["fail"] for d in dims_)))
     return 0 if ok else 0
 
 

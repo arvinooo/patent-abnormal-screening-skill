@@ -115,7 +115,8 @@ def judge(case: dict, text_dims: dict | None = None, verbose: bool = False) -> d
             ev["②代理量"] = "该所名录查无此人 → 待核查"
         else:
             dims["②代理量"] = "fail" if ag["value"] >= R.T["agent_fail"] else "pass"
-            ev["②代理量"] = f"本所口径，滚动 12 个月 {ag['value']} 件（{ag['window'][0]} ~ {ag['window'][1]}）"
+            ev["②代理量"] = (f"本所口径，滚动 12 个月（{ag['window'][0]} ~ {ag['window'][1]}），"
+                             f"代理量 {ag['value']} 件")
 
     # ---------- 文本维（原样带入）
     for d in ("③技术领域", "④撰写", "⑥多件相似", "违法公德"):

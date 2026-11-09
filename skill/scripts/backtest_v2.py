@@ -116,10 +116,39 @@ def main(argv):
                           f"{r['evidence'].get('跨机构', {}).get('组数', '')} 组"),
                 "豁免": (r["waiver"] or {}).get("level", "—"),
             })
+            ev = r["evidence"]
+            xo = ev.get("跨机构") or {}
+            notes = {
+                "①类型": (ev.get("豁免依据") or "") + "；" +
+                          (c.get("notes", {}) or {}).get("①类型", "沿用 v1 判定"),
+                "①科技属性": (c.get("notes", {}) or {}).get("①科技属性", "沿用 v1 判定"),
+                "①社保": ev.get("①社保", ""),
+                "①主营匹配": (c.get("notes", {}) or {}).get("①主营匹配", "沿用 v1 判定"),
+                "研发能力": ev.get("研发能力", "未触发（有效件数 ≥5）"),
+                "发明人件数": ev.get("计数", ""),
+                "跨机构": ("申请人 %d 家 → 聚组 %d 组%s"
+                          % (xo.get("申请人数", 0), xo.get("组数", 0),
+                             ("；关联：" + "、".join(xo.get("关联依据") or [])) if xo.get("关联依据") else "")),
+                "②代理量": ev.get("②代理量", ""),
+                "③技术领域": (c.get("notes", {}) or {}).get("③技术领域", "沿用 v1 判定"),
+                "④撰写": (c.get("notes", {}) or {}).get("④撰写", "沿用 v1 判定"),
+                "⑥多件相似": (c.get("notes", {}) or {}).get("⑥多件相似", "沿用 v1 判定"),
+                "违法公德": (c.get("notes", {}) or {}).get("违法公德", "沿用 v1 判定"),
+            }
             rec = dict(case)
-            rec.update({"conclusion": r["conclusion"], "dims": r["dims"],
-                        "notes": {"v2证据": r["evidence"]},
-                        "v2_hits": r["hits"], "v1_conclusion": v1})
+            rec.update({"applicants": [case["applicant"]],
+                        "app_date": case.get("app_date") or "未提供（锚点=查询日）",
+                        "conclusion": r["conclusion"], "dims": r["dims"], "notes": notes,
+                        "v2_hits": r["hits"], "v1_conclusion": v1,
+                        "waiver": r.get("waiver"),
+                        "v2_counts": {"raw": r["detail"]["records_total"],
+                                      "dropped": len(r["detail"]["dropped"]),
+                                      "kept": len(r["detail"]["kept"]),
+                                      "raw_text": ev.get("计数", "")},
+                        "v2_cross_org": {"applicants": xo.get("申请人数", 0),
+                                         "groups": xo.get("组数", 0),
+                                         "edges": xo.get("关联依据") or []},
+                        "vendor": "v2 回测快照"})
             slug = re.sub(r"[^\w\u4e00-\u9fff]+", "_", case["title"] or "case")
             json.dump(rec, open(os.path.join(a.out, slug + ".json"), "w", encoding="utf-8"),
                       ensure_ascii=False, indent=1)
