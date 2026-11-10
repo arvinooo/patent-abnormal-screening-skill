@@ -244,10 +244,12 @@ def preview_count(expr: str, wait: float = 2.5) -> dict:
     tid = tab(sid)
     js(_PREVIEW % json.dumps(expr, ensure_ascii=False), sid, tid)
     time.sleep(wait)
-    d = js("(function(){"
-           "const m=document.body.innerText.match(/当前检索共\\\\s*([\\\\d,]+)\\\\s*条专利/);"
-           "const e=document.body.innerText.match(/检索式解析错误[^\\\\n]*/);"
-           "return JSON.stringify({count:m?m[1]:null,error:e?e[0]:null});})()", sid, tid)
+    code = r"""(function(){
+      const m=document.body.innerText.match(/当前检索共\s*([\d,]+)\s*条专利/);
+      const e=document.body.innerText.match(/检索式解析错误[^\n]*/);
+      return JSON.stringify({count:m?m[1]:null,error:e?e[0]:null});
+    })()"""
+    d = js(code, sid, tid)
     n = d.get("count")
     return {"expr": expr, "count": int(str(n).replace(",", "")) if n else None,
             "error": d.get("error")}
