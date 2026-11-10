@@ -23,7 +23,12 @@ import tempfile
 import time
 
 CACHE = os.environ.get("PATENT_CACHE_DIR", "cache")
-NS = ("company", "agent", "inventor", "other")
+NS = ("company", "agent_month", "inventor", "other")
+
+# 每个命名空间的当前数据口径（schema 版本）。
+# 缓存命中必须同时满足：口径一致（_schema 相同且 _valid 不为 False）+ 在有效期内。
+# 口径对不上 = 未命中，一律重查，查到再写回。
+SCHEMA = {"company": 1, "agent_month": 2, "inventor": 1, "other": 1}
 
 
 def _path(ns):
@@ -65,10 +70,24 @@ def _age_days(rec):
     return max(0.0, (time.time() - fetched) / 86400.0)
 
 
+def _schema_ok(ns, rec):
+    """口径校验：旧 schema 或显式标记无效的记录一律当未命中。"""
+    want = SCHEMA.get(ns)
+    if rec.get("_valid") is False:
+        return False
+    if want is not None and int(rec.get("_schema", 1)) != want:
+        return False
+    return True
+
+
 def cmd_get(ns, key, max_age):
     rec = _load(ns).get(key)
     if not rec:
         print("null")
+        return 1
+    if not _schema_ok(ns, rec):
+        print(json.dumps({"schema_mismatch": True, "_schema": rec.get("_schema", 1),
+                          "want": SCHEMA.get(ns), "value": rec}, ensure_ascii=False))
         return 1
     age = _age_days(rec)
     if age > max_age:
@@ -83,6 +102,7 @@ def cmd_get(ns, key, max_age):
 
 def cmd_set(ns, key, payload):
     data = dict(payload)
+    data.setdefault("_schema", SCHEMA.get(ns, 1))
     data["_fetched"] = payload.get("_fetched") or time.strftime("%Y-%m-%d")
     data["_set_at"] = time.strftime("%Y-%m-%d %H:%M:%S")
     store = _load(ns)

@@ -19,7 +19,8 @@ description: Use when the user supplies Chinese patent application text (PDF 公
    - **项目根 `./cache/`**：脚本默认缓存目录（`PATENT_CACHE_DIR=./cache`），含 `company`（工商四项+资质）/ `agent`（代理量）/ `inventor`（发明人记录）/ `docx` `/` `pdf`（文本解析）。查法 `python3 scripts/cache.py list <ns>`、`get <ns> "<键>"`。**只翻 skill 包里的 `cache/` 不算查过**，那是另一个目录。
    - **`results/` 下同一批次的既有跑批结果**：`cases/*.json` + `_batch.json`（写明工商/代理量/专利库各自的**取数日**）。先看能不能直接引用，只补过期或缺的维。
    - **skill 包内 `cache/` 与 `scripts/cache/`**（标定用旧对比文件、样例数据）。
-   细则见 `data-sources.md` §4（缓存协议：命名空间、有效期、规则 1–6）与 §12（缓存命名空间）。
+   **能用的就用、不能用的就查、查到就写回**：命中必须「口径一致 + 有效期内」，口径对不上（如旧 `agent` 存的是当年累计、现在要滚动 12 个月）等于没命中；0 积分能查的维度不许拿过期缓存顶替；查完立刻 `cache.py set` 写回。
+   细则见 `data-sources.md` §4（缓存协议：命名空间、有效期、规则 1–7）与 §12（缓存命名空间）。
 1. **全维判定**：11 个维度每项都要出结论，任一维不过（且未被豁免）→ 非正常。
 2. **不因"已定案"跳过维度**：已有一维不过，其余维照常取数、照常记录。省成本靠缓存，不靠短路。
 3. **数据拿不到 → 待核查**：不默认通过（漏判），也不凭空判不过（误伤）。
