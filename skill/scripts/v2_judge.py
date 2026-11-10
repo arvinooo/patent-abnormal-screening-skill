@@ -40,7 +40,8 @@ def judge(case: dict, text_dims: dict | None = None, verbose: bool = False) -> d
 
     # ---------- 第 4 步：⑤ 发明人件数（剔重名 → 计数）
     anchor = case.get("app_date") or None          # 窗口锚点 = 本案申请日（无则查询日）
-    inv = F.inventor_records(case["first_inventor"], anchor)
+    inv = F.inventor_records(case["first_inventor"], anchor,
+                             co_inventors=case.get("inventors") or [])
     dd = R.dedupe(inv.get("records") or [], case)
     kept, dropped, pend = dd["kept"], dd["dropped"], dd["pending"]
     N = len(kept)

@@ -104,8 +104,8 @@ def decide_identity(rec: dict, case: dict) -> tuple[str, str]:
     same_ipc = same_field(rec.get("ipc"), case.get("ipc"))
 
     # 外观设计与实用新型/发明不可能是同一件申请 → 直接剔除
-    pub = str(rec.get("application_number") or "")
-    if (not ipc_code(rec.get("ipc")) and rec.get("is_design")) or re.search(r"S$", str(rec.get("publication_number") or "")):
+    pub_no = str(rec.get("pub") or rec.get("publication_number") or "")
+    if (not ipc_code(rec.get("ipc")) and rec.get("is_design")) or re.search(r"S$", pub_no):
         return "drop", "外观设计，与本案不同类型"
 
     if overlap and not (overlap & COMMON_NAMES):
@@ -130,7 +130,8 @@ def dedupe(records: list[dict], case: dict) -> dict:
     kept, dropped, pend = [], [], []
     for r in records:
         st, why = decide_identity(r, case)
-        item = {"app_no": r.get("application_number"), "title": (r.get("title") or "")[:40],
+        item = {"app_no": r.get("app_no") or r.get("application_number"),
+                "title": (r.get("title") or "")[:40],
                 "applicants": r.get("applicants") or [], "ipc": ipc_code(r.get("ipc")),
                 "reason": why}
         (kept if st == "keep" else dropped if st == "drop" else pend).append(item)

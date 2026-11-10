@@ -11,14 +11,12 @@ import os
 import re
 import subprocess
 import time
-import urllib.request
 
 import bsk_helper as B
+import inco_client as INCO
 
 CACHE = os.environ.get("PATENT_CACHE_DIR", "cache")
 CACHE_PY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache.py")
-KEY_FILE = os.environ.get("MINDFLOW_KEY_FILE",
-                          "/mnt/c/Users/Arvin/Desktop/yunjia/非正常/发明人/发明人key.txt")
 
 
 # ---------------------------------------------------------------- 缓存（文件式，支持新命名空间）
@@ -68,34 +66,6 @@ def cache_set(ns: str, key: str, obj: dict):
     _save(ns, data)
 
 
-# ---------------------------------------------------------------- mindflow MCP
-
-def mcp(expr: str, max_results: int = 1000) -> dict:
-    key = open(KEY_FILE, encoding="utf-8").read().strip()
-    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-                       "params": {"name": "patent_expression_search",
-                                  "arguments": {"expression": expr, "max_results": max_results}}},
-                      ensure_ascii=False).encode()
-    req = urllib.request.Request("https://mcp.mindflow.cn/api/mcp", data=body, method="POST",
-                                 headers={"Authorization": "Bearer " + key,
-                                          "Content-Type": "application/json",
-                                          "Accept": "application/json, text/event-stream"})
-    for attempt in range(6):
-        try:
-            raw = urllib.request.urlopen(req, timeout=300).read().decode()
-            res = json.loads(re.search(r"data: (\{.*\})", raw, re.S).group(1))["result"]
-            if not res.get("isError"):
-                return res["structuredContent"]
-            txt = (res.get("content") or [{}])[0].get("text", "")
-            if "mcp_rate_limited" in txt:
-                time.sleep(4 + 2 * attempt)
-                continue
-            return {"error": txt[:300]}
-        except Exception:
-            time.sleep(5)
-    return {"error": "retry exhausted"}
-
-
 # ---------------------------------------------------------------- 发明人记录（12 个月）
 
 def window(anchor: str | dt.date | None = None) -> tuple[str, str]:
@@ -111,75 +81,65 @@ def window(anchor: str | dt.date | None = None) -> tuple[str, str]:
     return start.strftime("%Y%m%d"), d.strftime("%Y%m%d")
 
 
-def inventor_records(name: str, anchor: str | dt.date | None = None) -> dict:
-    """滚动 12 个月（锚=本案申请日）、不论位次、按申请号去重；records 补 ipc。"""
+def inventor_records(name: str, anchor: str | dt.date | None = None,
+                     co_inventors: list[str] | None = None) -> dict:
+    """滚动 12 个月（锚=本案申请日）、不论位次、按申请号去重。
+
+    剔重名所需的共同发明人：incoPat 结果行不含发明人名单，改用反查——
+    对本案其余发明人各检索一次，与候选记录按申请号求交集，
+    交集内的记录标记 co_inventors（见 rules/20-inventor.md §2.2）。
+    """
     s, e = window(anchor)
-    key = f"{name}|{s}|{e}"
+    others = [x for x in (co_inventors or []) if x and x != name]
+    key = f"{name}|{s}|{e}|{'/'.join(sorted(others))}"
     hit = cache_get("inventor", key, max_age=7)
     if hit:
         return hit
-    expr = f"IN:({name}) AND APD:[{s} TO {e}]"
-    sc = mcp(expr, max_results=1000)
-    recs, total = [], sc.get("total") or 0
-    for r in sc.get("records") or []:
-        recs.append({
-            "application_number": r.get("application_number"),
-            "application_date": r.get("application_date"),
-            "title": r.get("title"),
-            "inventors": r.get("inventors") or [],
-            "applicants": list(dict.fromkeys((r.get("current_applicants") or [])
-                                             + (r.get("original_applicants") or []))),
-        })
-    # 去重（一案双申/多公开文本）
-    seen, uniq = set(), []
-    for r in recs:
-        k = r["application_number"]
-        if k in seen:
+
+    raw = INCO.inventor_patents(name, s, e)
+    recs = raw.get("records") or []
+    total = raw.get("total_raw") or 0
+
+    # 反查共同发明人：{其他发明人名: 申请号集合}
+    co_map = {}
+    errors = list(raw.get("errors") or [])
+    for other in others:
+        rr = INCO.inventor_patents(other, s, e)
+        if rr.get("errors"):
+            errors.extend(rr["errors"])
             continue
-        seen.add(k)
-        uniq.append(r)
+        co_map[other] = {x.get("app_no") for x in (rr.get("records") or []) if x.get("app_no")}
 
-    # IPC：浏览器结果表（0 积分），按申请号回填
-    if uniq:
-        try:
-            rows = B.search_rows(expr).get("rows") or []
-            ipc = {x["app_no"]: x["ipc"] for x in rows if x.get("app_no") and x.get("ipc")}
-            for r in uniq:
-                r["ipc"] = ipc.get(r["application_number"], "")
-        except Exception:
-            for r in uniq:
-                r.setdefault("ipc", "")
+    for r in recs:
+        hits = [o for o, nos in co_map.items() if r.get("app_no") in nos]
+        r["inventors"] = hits
+        r["co_inventors"] = hits
 
-    out = {"inventor": name, "expr": expr, "window_start": s, "window_end": e,
-           "anchor": e, "total_raw": total, "records": uniq,
-           "common_name": total > 1000,
-           "_fetched": dt.date.today().isoformat(), "_source": "mcp+bsk"}
-    cache_set("inventor", key, out)
+    out = {"inventor": name, "expr": raw.get("expr"), "window_start": s, "window_end": e,
+           "anchor": e, "total_raw": total, "stat": raw.get("stat") or {},
+           "records": recs, "co_lookup": {k: len(v) for k, v in co_map.items()},
+           "common_name": total > 1000, "errors": errors,
+           "_fetched": dt.date.today().isoformat(), "_source": "incoPat(bsk)"}
+    if recs or total == 0:
+        cache_set("inventor", key, out)
     return out
 
 
 # ---------------------------------------------------------------- 1.1 授权发明专利
 
 def granted_inventions(app: str, base_date: str | None = None) -> dict:
-    """到 base_date 为止，申请人是否有授权发明专利（ISD 非空）。0 积分（浏览器计数）。"""
+    """到 base_date 为止，申请人是否有授权发明专利（结果页「发明授权」统计）。"""
     base = (base_date or dt.date.today().strftime("%Y%m%d")).replace("-", "")
     key = f"{app}|{base}"
     hit = cache_get("company_rd", key, max_age=90)
     if hit:
         return hit
-    expr = f"ALL_AN:({app}) AND PATENT_TYPE:(发明专利) AND ISD:[* TO {base}]"
-    n = None
-    try:
-        n = B.count_only(expr)
-    except Exception:
-        pass
-    if n is None:
-        sc = mcp(expr, max_results=1)
-        n = sc.get("total")
-    out = {"applicant": app, "expr": expr, "granted_invention": n,
-           "base_date": base, "has": (n or 0) >= 1 if n is not None else None,
-           "_fetched": dt.date.today().isoformat()}
-    if n is not None:
+    r = INCO.granted_invention(app, base)
+    out = {"applicant": app, "expr": r.get("expr"), "granted_invention": r.get("granted_invention"),
+           "base_date": base, "has": r.get("has"), "total": r.get("total"),
+           "stat": r.get("stat") or {}, "errors": [r["error"]] if r.get("error") else [],
+           "_fetched": dt.date.today().isoformat(), "_source": "incoPat(bsk)"}
+    if out["has"] is not None:
         cache_set("company_rd", key, out)
     return out
 
@@ -300,34 +260,17 @@ def agent_rolling(name: str, anchor: str | dt.date | None = None) -> dict:
 
 # ---------------------------------------------------------------- ③ 创新度：对比文件检索（v2.1）
 
-def mcp_tool(name: str, arguments: dict, retries: int = 6) -> dict:
-    """通用 MCP 工具调用（expression_search / semantic_patent_search / patent_claims…）。"""
-    key = open(KEY_FILE, encoding="utf-8").read().strip()
-    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-                       "params": {"name": name, "arguments": arguments}},
-                      ensure_ascii=False).encode()
-    req = urllib.request.Request("https://mcp.mindflow.cn/api/mcp", data=body, method="POST",
-                                 headers={"Authorization": "Bearer " + key,
-                                          "Content-Type": "application/json",
-                                          "Accept": "application/json, text/event-stream"})
-    for attempt in range(retries):
-        try:
-            raw = urllib.request.urlopen(req, timeout=300).read().decode()
-            res = json.loads(re.search(r"data: (\{.*\})", raw, re.S).group(1))["result"]
-            if not res.get("isError"):
-                return res["structuredContent"]
-            txt = (res.get("content") or [{}])[0].get("text", "")
-            if "rate" in txt.lower():
-                time.sleep(4 + 2 * attempt)
-                continue
-            return {"error": txt[:300]}
-        except Exception:
-            time.sleep(5)
-    return {"error": "retry exhausted"}
+def _norm_date(x) -> str:
+    """incoPat 给 YYYYMMDD，统一成 YYYY-MM-DD，便于与本案申请日比较。"""
+    s = str(x or "").strip()[:10]
+    if len(s) == 8 and s.isdigit():
+        return f"{s[:4]}-{s[4:6]}-{s[6:8]}"
+    return s
 
 
 def _pub_date(r: dict) -> str:
-    return str(r.get("publication_date") or r.get("application_date") or "")[:10]
+    return _norm_date(r.get("pub_date") or r.get("app_date") or
+                      r.get("publication_date") or r.get("application_date"))
 
 
 def prior_art(queries: list[str], semantic: str | None = None,
@@ -335,7 +278,7 @@ def prior_art(queries: list[str], semantic: str | None = None,
               keywords: list[str] | None = None) -> dict:
     """③ 创新度取数：布尔检索 + 语义检索两路，合并去重，只留早于本案的文件。
 
-    queries  : 布尔检索式列表（含精确组 + 上位组，见 rules/50 §3b）
+    queries  : 布尔检索式列表（incoPat 语法，见 rules/50 §3b）
     semantic : 语义检索输入（独权原文 + 创新点清单）
     before   : 本案申请日（YYYY-MM-DD）；无申请日传查询日
     """
@@ -351,88 +294,90 @@ def prior_art(queries: list[str], semantic: str | None = None,
         return hit
 
     cands, routes, errors = {}, [], []
+
+    def _add(rec: dict, route: str, score=None):
+        p = rec.get("pub") or rec.get("app_no")
+        if not p:
+            return
+        e = cands.setdefault(p, {
+            "pub": rec.get("pub"), "app_no": rec.get("app_no"),
+            "app_date": rec.get("app_date"), "pub_date": rec.get("pub_date"),
+            "title": rec.get("title"), "ipc": rec.get("ipc"),
+            "applicants": rec.get("applicants") or [], "_route": []})
+        if route not in e["_route"]:
+            e["_route"].append(route)
+        if score is not None:
+            e["score"] = max(e.get("score") or 0, score)
+
     for q in queries:
-        sc = mcp(q, max_results=30)
-        if sc.get("error"):
-            errors.append(f"布尔 {q}: {sc['error']}")
+        r = INCO.search(q)
+        if r.get("error"):
+            errors.append(f"布尔 {q}: {r['error']}")
             continue
-        routes.append(f"布尔 {q}（{sc.get('total')} 篇）")
-        for r in sc.get("records") or []:
-            p = str(r.get("publication_number") or "")
-            if not p:
-                continue
-            cands.setdefault(p, {
-                "pub": p, "app_no": r.get("application_number"),
-                "app_date": r.get("application_date"), "pub_date": r.get("publication_date"),
-                "title": r.get("title"),
-                "applicants": list(dict.fromkeys((r.get("current_applicants") or [])
-                                                 + (r.get("original_applicants") or []))),
-                "_route": ["布尔"]})
+        routes.append(f"布尔 {q}（{r.get('count')} 篇）")
+        for x in r.get("rows") or []:
+            _add(x, "布尔")
 
     if semantic:
-        sc = mcp_tool("semantic_patent_search", {"query": semantic, "max_results": 10})
-        if sc.get("error"):
-            errors.append(f"语义: {sc['error']}")
+        r = INCO.semantic(semantic)
+        if r.get("error"):
+            errors.append(f"语义: {r['error']}")
         else:
-            routes.append("语义 semantic_patent_search")
-            for r in sc.get("records") or []:
-                p = str(r.get("publication_number") or "")
-                if not p:
-                    continue
-                e = cands.setdefault(p, {
-                    "pub": p, "app_no": r.get("application_number"),
-                    "app_date": r.get("application_date"), "pub_date": r.get("publication_date"),
-                    "title": r.get("title"),
-                    "applicants": list(dict.fromkeys((r.get("current_applicants") or [])
-                                                     + (r.get("original_applicants") or [])))})
-                e.setdefault("_route", []).append("语义")
+            routes.append(f"语义（{r.get('count')} 篇，带相关度）")
+            for x in r.get("rows") or []:
+                _add(x, "语义", x.get("score"))
 
     # 只看早于本案的文件（申请日或公开日早于 before）
     keep = [c for c in cands.values()
-            if (_pub_date(c) and _pub_date(c) < before) or
-               (str(c.get("app_date") or "")[:10] and str(c.get("app_date"))[:10] < before)]
+            if (_norm_date(c.get("app_date")) and _norm_date(c.get("app_date")) < before)
+            or (_norm_date(c.get("pub_date")) and _norm_date(c.get("pub_date")) < before)]
 
     out = {"before": before, "queries": queries, "semantic": bool(semantic),
            "routes": routes, "all_candidates": keep, "candidates": keep[:limit],
            "candidates_total": len(keep), "errors": errors,
-           "_fetched": dt.date.today().isoformat(), "_source": "mindflow(mcp)"}
+           "_fetched": dt.date.today().isoformat(), "_source": "incoPat(bsk)"}
     if routes:  # 至少有一路成功才缓存
         cache_set("prior_art", sig, out)
     return _rank_prior(out, keywords, limit)
 
 
 def _rank_prior(out: dict, keywords: list[str] | None, limit: int) -> dict:
-    """排序：语义命中优先，其次标题命中领域关键词数，再按公开日早的靠前。"""
+    """排序：语义相关度 > 标题命中领域关键词数 > 公开日早的靠前。"""
     kws = [k for k in (keywords or []) if k]
     scored = []
     for c in out.get("all_candidates") or out.get("candidates") or []:
         t = c.get("title") or ""
-        score = 3 * ("语义" in (c.get("_route") or [])) + 2 * sum(1 for k in kws if k in t)
+        sem = c.get("score") or 0
+        score = sem + 2 * sum(1 for k in kws if k in t)
         scored.append((score, _pub_date(c), c))
     scored.sort(key=lambda x: (-x[0], x[1] or "9999"))
     res = dict(out)
     res["candidates"] = [c for _, _, c in scored[:limit]]
-    res["ranked_by"] = "语义命中>标题关键词>公开日"
+    res["ranked_by"] = "语义相关度>标题关键词>公开日"
     return res
 
 
 def prior_claims(pubs: list[str]) -> dict:
-    """取对比文件的权利要求原文（10 积分/篇，批量上限 100）。"""
+    """取对比文件的权项文本。
+
+    incoPat 结果行默认不含权利要求，需先在结果页「显示字段」勾选
+    「首项权利要求(中文)」；勾选后列表行会带该字段，这里按公开号回填。
+    取不到时返回 missing，由规则层标 pending。
+    """
     pubs = [p for p in dict.fromkeys(pubs) if p]
     if not pubs:
         return {"claims": {}, "errors": ["no pubs"]}
     cache_all = _load("prior_claims")
     need = [p for p in pubs if p not in cache_all]
     if need:
-        sc = mcp_tool("patent_claims", {"publication_numbers": need[:100]})
-        for r in (sc.get("records") or []):
-            p = str(r.get("publication_number") or "")
-            if not p:
+        for pub in need[:20]:
+            r = INCO.claims_text(pub)
+            txt = (r.get("claims") or "").strip()
+            if not txt:
                 continue
-            cl = r.get("claims") or []
-            txt = "\n".join(cl) if isinstance(cl, list) else str(cl)
-            cache_all[p] = {"pub": p, "title": r.get("title"), "claims_text": txt,
-                            "_fetched": dt.date.today().isoformat()}
+            cache_all[pub] = {"pub": pub, "claims_text": txt,
+                              "_fetched": dt.date.today().isoformat(),
+                              "_source": "incoPat(bsk)"}
         _save("prior_claims", cache_all)
     got = {p: cache_all[p] for p in pubs if p in cache_all}
     return {"claims": got, "missing": [p for p in pubs if p not in cache_all]}

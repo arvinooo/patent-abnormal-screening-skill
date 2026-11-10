@@ -1,6 +1,6 @@
 ---
 name: patent-abnormal-screening
-description: Use when the user supplies Chinese patent application text (PDF 公开文本 or Word 正文) and asks whether it is 非正常申请 (abnormal filing) under CNIPA Order No.77 — 判断"正常/非正常""非正常申请""77号令筛查"时。全维口径：申请人资质与授权发明专利、发明人件数（剔重名）、跨机构申请、代理师代理量、技术领域、撰写、多件相似、违法公德；含专精特新豁免。外部取数先查本地 cache，不重复花额度。
+description: Use when the user supplies Chinese patent application text (PDF 公开文本 or Word 正文) and asks whether it is 非正常申请 (abnormal filing) under CNIPA Order No.77 — 判断"正常/非正常""非正常申请""77号令筛查"时。全维口径：申请人资质与授权发明专利、发明人件数（剔重名）、跨机构申请、代理师代理量、技术领域、撰写、多件相似、违法公德；含专精特新豁免。外部取数先查本地 cache，不重复取数。
 ---
 
 # 专利非正常申请筛查
@@ -17,7 +17,7 @@ description: Use when the user supplies Chinese patent application text (PDF 公
 
 0. **先查缓存再取数。** 取数前依次查三处：项目根 `./cache/`（`company` / `agent_month` / `inventor` / `docx` / `pdf`）、`results/` 下同一批次的既有结果、skill 包内 `cache/` 与 `scripts/cache/`。
    命中条件：`_schema` 与当前口径一致，且在有效期内。不满足按未命中处理，重新取数；取数完成后用 `cache.py set` 写回。报告标注「缓存值（原始取数日）」。
-   细则见 `data-sources.md` §4（缓存协议）与 §12（缓存命名空间）。
+   细则见 `data-sources.md` §4（缓存协议）与 §12（缓存命名空间）。外部取数走 incoPat 浏览器：取数前浏览器须已登录 incoPat 账号。
 1. **全维判定**：11 个维度每项都要出结论，任一维不过（且未被豁免）→ 非正常。
 2. **不因"已定案"跳过维度**：已有一维不过，其余维照常取数、照常记录。省成本靠缓存，不靠短路。
 3. **数据拿不到 → 待核查**：不默认通过（漏判），也不凭空判不过（误伤）。
@@ -60,7 +60,7 @@ description: Use when the user supplies Chinese patent application text (PDF 公
          否则 → 正常
 ```
 
-**成本顺序**：第 2–3 步本地或免费；第 2.5 步约 20–40 积分/案（布尔 10 + 语义 10 + 权项 10/篇，缓存 7 天）；第 1.5 步 1.1 每案一次专利库检索（缓存 90 天）；第 4、5 步共用一次发明人检索（MCP 10 积分/人 + 浏览器 IPC 免费）；第 1、6 步各一次工商/代理量查询（走缓存）。
+**成本顺序**：第 2–3 步本地；第 2.5 步一次布尔 + 一次语义检索（incoPat 浏览器，无接口费用，缓存 7 天）；第 1.5 步 1.1 每案一次申请人口径检索（缓存 90 天）；第 4、5 步共用一次发明人检索（incoPat 浏览器，无接口费用）；第 1、6 步各一次工商/代理量查询（走缓存）。
 
 **窗口统一锚点**：所有"12 个月"都从**本案提交申请那天**往前推（无申请日则用查询日），报告必须写明锚点。
 
@@ -74,9 +74,9 @@ description: Use when the user supplies Chinese patent application text (PDF 公
 | ①科技属性 | 名称/经营范围 | 强/弱科技属性 | 无研发类业务 | ✅ | 同上 |
 | ①社保 | 企查查 | ≥10 人（3–10 灰区） | <3 人 | ✅ | 同上 |
 | ①主营匹配 | 技术对象 × 经营范围 | 一致/相邻 | 无关 | ✅ | 同上 |
-| 1.1 授权发明专利 | 星河智源 | 授权发明专利 ≥1 | 0 件 | ✅ | 同上 |
-| 发明人件数 | 星河智源 | 剔重名后 <5 件 | ≥5 件 | ❌ | `rules/20-inventor.md` |
-| 跨机构（2.1） | 星河智源 + 企查查 | 关联聚组 1–2 组 | 无关联组数 ≥3 | ❌ | `rules/30-cross-org.md` |
+| 1.1 授权发明专利 | incoPat | 授权发明专利 ≥1 | 0 件 | ✅ | 同上 |
+| 发明人件数 | incoPat | 剔重名后 <5 件 | ≥5 件 | ❌ | `rules/20-inventor.md` |
+| 跨机构（2.1） | incoPat + 企查查 | 关联聚组 1–2 组 | 无关联组数 ≥3 | ❌ | `rules/30-cross-org.md` |
 | ②代理量 | 香橼树 | <300 件/12 月 | ≥300 件 | ❌ | `rules/40-agency.md` |
 | ③技术领域 | 文本（+ 仅四类内才检索） | 非四类一律过；机械装置/方法步骤图须创新度够（覆盖度<80% 或有实质差异） | 生活类、计算机算法；机械装置/方法步骤图中单篇覆盖≥80% 且差异为常见替换/公知常识、单篇100%、两篇拼凑 | ❌ | `rules/50-drafting.md` §3a–§3c |
 | ④撰写 | 文本 | 有多级布局 | 独权写死 | ❌ | 同上 |

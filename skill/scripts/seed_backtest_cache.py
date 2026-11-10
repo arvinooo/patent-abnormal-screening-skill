@@ -6,8 +6,8 @@
     写成缓存快照，供 backtest_v2.py 离线跑。每条都标了来源。
 
 数据来源：
-    发明人 12 个月记录 + IPC     星河智源（浏览器，2026-11-09 逐条核对申请人/IPC）
-    授权发明专利件数              星河智源 + MCP（2026-11-09，4 家均为 0）
+    发明人 12 个月记录 + IPC     incoPat（浏览器，2026-11-09 逐条核对申请人/IPC）
+    授权发明专利件数              incoPat（4 家均为 0）
     荣誉（专精特新）             企查查 get_honor_info（2026-11-09）
     代理师月度代理量              香橼树月度统计（2026-11-09，汝涛逐月实测）
 
@@ -26,7 +26,7 @@ TODAY = dt.date.today().isoformat()
 def inv(name, records, total):
     return {"inventor": name, "records": records, "total_raw": total,
             "window_start": "20251109", "window_end": "20261109",
-            "_fetched": TODAY, "_source": "星河智源（回测快照）"}
+            "_fetched": TODAY, "_source": "incoPat（回测快照）"}
 
 
 def rec(app_no, title, ipc, applicants, inventors=None, is_design=False):

@@ -78,11 +78,11 @@ python3 scripts/cache.py set company "<申请人全名>" --json '{
 
 `bsk session start` 每调一次就在 Edge 里新开一个窗口，没有「复用」参数。所以：
 
-1. **全批一个会话**：动手前先 `bsk session list --json`。已有会话 → 记下 `session_id` 并全批复用（每条 bsk 命令都带 `--session <id>`，MCP 工具就传 `session`）；一个都没有 → `bsk session start` 只开一次。
-2. **不按案、不按维开新会话**：②代理量（香橼树）和发明人件数/跨机构（星河智源）在同一个窗口里换标签页做，用 `bsk tab create`。
+1. **全批一个会话**：动手前先 `bsk session list --json`。已有会话 → 记下 `session_id` 并全批复用（每条 bsk 命令都带 `--session <id>`）；一个都没有 → `bsk session start` 只开一次。
+2. **不按案、不按维开新会话**：②代理量（香橼树）和发明人件数/跨机构（incoPat）在同一个窗口里换标签页做，用 `bsk tab create`。
 3. **子 agent 不碰浏览器**：每个子 agent 自己 start 就各开一个窗口。浏览器步骤只由主 agent 串行跑。
 4. **收尾必关**：`bsk session stop <id>` 收**位置参数**；写成 `bsk session stop --session <id>` 返回 `cli_parse_error`，窗口根本关不掉。成功、报错、中断三条路都要关，批末兜底 `bsk session stop --all`。
-5. `scripts/mindflow_inventor.py` 默认复用已有会话、只关自己开的那个；不要加 `--new-session`。
+5. `scripts/inco_inventor.py` 默认复用已有会话、只关自己开的那个；不要加 `--new-session`。
 
 需求：某代理师**当年 1月1日至今的累计代理量**（只用当年口径，不取滚动 12 个月、不取历史年份）。
 
@@ -133,121 +133,55 @@ python3 scripts/cache.py set agent_month "张亮|2026-11-10" --json '{
 
 ## 3. 发明人（当年件数 + 申请人一致性·跨机构）
 
-**两条路，浏览器优先（0 积分），MCP 兜底（10 积分/人）。**
+走 incoPat 浏览器，0 平台接口成本。
 
-### 3.1 最快路径：跑脚本，一条命令
+### 3.1 最快路径：跑脚本
 
 ```bash
-python3 scripts/mindflow_inventor.py --names "金锐博,王键,张钦崇" --out cache/inventor_batch.json
+python3 scripts/inco_inventor.py --names "金锐博,王键,张钦崇" --out cache/inventor_batch.json
 # 复用已有会话、只关自己开的那个；单人就把 --names 去掉直接传名字
 ```
 
-脚本做两件事，**能省的动作全省掉**：
+脚本对每个发明人：
 
-| 判据 | 检索式 | 取数方式 | 备注 |
-|---|---|---|---|
-| 当年件数 | `IN:(姓名) AND APD:[YYYY0101 TO 今天]` | **MCP 结构化记录**，按 `application_number` 去重计件 | 不论发明人位次；`F_IN` 只含第一发明人，不用于本判定 |
-| 浏览器校验 | `IN:(姓名) AND APD:[...]` | 读「检索到 N 组」或即时预览条数 | 交叉校验用，最终以去重件数为准 |
-| 名下全部专利的申请人 | `IN:(姓名)` | 点检索，读结果表「当前申请(专利权)人」列 | 锁身份仍以 `inventors[0]`＝本人 |
+1. `IN=(姓名) AND AD=[窗口起 TO 窗口止]` 检索；
+2. 结果页每页调到 100，翻页收集结果行；
+3. 按申请号去重（一案双申只算 1 件）；
+4. 对本案其余发明人各跑一次同窗口 `IN=(...)`，按申请号求交集，标 `co_inventors`（剔重名用）。
 
-**阈值判断**：件数 ≤5 → 通过；>5 → 不过。截断（total 数千）时去重件数是下限，报告要标。
+| 判据 | 检索式 | 取数方式 |
+|---|---|---|
+| 窗口内件数 | `IN=(姓名) AND AD=[起 TO 止]` | 结果行按申请号去重计数 |
+| 共同发明人 | 其余发明人各一次同窗口 `IN=(...)` | 与候选记录按申请号求交集 |
+| 申请人（跨机构） | 结果行「申请人」列 | 直接读 |
 
-实测：焦劼 `IN` 当年 5 条记录 → 去重 5 件；27 人一轮 MCP 约 270 积分、6 分钟。
+**阈值**：去重件数 ≥5 → 不过（T03）。
 
-### 3.2 手工路径（脚本跑不通时照这个做，8 个动作）
+### 3.2 手工路径（脚本跑不通时照这个做）
 
-1. 按 §2.0 拿到会话 `<S>`（复用现有的，没有才开）
-   → `bsk tab create --session <S> --url https://www.mindflow.cn/search/fusion`
-   （站内常把该 URL 重定向到上次的结果页，**必须再 navigate 一次**才落到融合检索页）
-2. `bsk cooperate sync --session <S>` → 拿 `context_id` 和 refs
-3. 点「检索式方式」（表格方式下没有表达式输入框）
-4. 填「请输入检索式」= `IN:(姓名) AND APD:[YYYY0101 TO 今天]`
-5. 读 `当前检索共 N 条专利` → ≤5 就收工
-6. 再填 `IN:(姓名)` → 提交
-7. 读结果页 `检索到 N 组（共 M 条）`
-8. 读表格行的「当前申请(专利权)人」列
+1. 打开 `https://www.incopat.com/advancedSearch/init`
+2. 指令检索框填 `IN=(姓名) AND AD=[起 TO 止]`
+3. 点「检索」，读结果页 `共 N 条` 与左侧类型统计
+4. 页脚把每页调到 100，读结果行
 
-**结果表字段**（够跨机构判定用）：
-`公开(公告)号｜标题｜申请日｜公开(公告)日｜法律状态/事件｜当前申请(专利权)人｜IPC｜公开类型｜申请号｜专利有效性｜保全次数`
+**结果行字段**：`公开(公告)号｜类型｜法律状态｜标题｜公开(公告)日｜申请号｜申请日｜申请人｜IPC分类号`
 
 ### 3.3 常见问题与处理（照抄绕法）
 
 | 坑 | 现象 | 绕法 |
 |---|---|---|
-| 合作上下文 | `requires the context returned by the latest cooperate sync` | 每个动作前先 `cooperate sync`，把 `context_id` 传给动作；`navigate` 这类无目标动作还要带 `--observation <id>` |
-| refs 每轮重排 | 上一轮的 `@e146` 下一轮变成别的元素 | 动作紧跟 sync，**只用同一轮的 ref**，绝不跨轮复用 |
-| 检索按钮被遮 | 右下角「在线咨询」气泡压住按钮，click 报 `Could not clear the extension overlay` | **聚焦按钮再按 Enter**（`press --ref <检索按钮> Enter`），不要试图点它 |
-| 表格虚拟滚动 | `bsk extract table` 返回 `rows_returned: 0` | 从 `observe` 的 `row "..."` / `cell "..."` 文本里解析 |
-
-另外：sync 在页面没变化时只返回 `kind=unchanged`、不带 observation 文本，这时补一次 `observe`。
-
-会话怎么开、怎么复用、怎么关（`bsk session stop <id>` 是位置参数），见 §2.0。
+| 页面脚本未就绪 | 提交即报 `search4Kin_common_... is not defined` | 等到 `typeof directSearch==='function'` 再提交；用 `inco_client.wait_ready()` |
+| 结果异步渲染 | 提交后 `共 N 条` 迟迟不出现 | 轮询读取条数，最多 4 次、每次 3 秒 |
+| 零结果没有「共0条」 | 页面显示「暂无匹配结果」 | 按 0 条处理，不能当检索失败 |
+| 显示字段勾选被打断 | `User activity revoked this action` | 不依赖显示字段；发明人一律用反查法 |
+| 日期写法 | `AD>=`、`AD=[* TO 止]` 报「检索式解析错误」 | 统一 `AD=[起 TO 止]`，无起点用 `19850101` |
 
 ### 3.4 口径与交叉校验
 
-- **件数用「组」不用「条」**：组=一个申请；条=一份公开文本（A/B 文、一案双申会让条数虚高）。
-- **件数一律用 `IN:(姓名)`**：`IN` 命中发明人一栏的任意位次，按 `application_number` 去重计件；`F_IN` 只含第一发明人，会漏件，不用于本判定（跨机构判定锁身份才用 `inventors[0]`）。
-- **必做交叉校验**：浏览器件数 > 5（要用到"不过"结论）时，用 MCP 复核一次。两源不一致 → 件数标「待核查」，别直接判非正常。实测王键 2026 年：浏览器 26 组 vs MCP 8 件，差异来自两库收录范围不同，直接采信任何一方都会错。
-- 跨机构判定用浏览器 `IN:(姓名)` 全量清单比对本案申请人；异申请人名单必须写进报告（子母公司分流、同名碰撞都会命中）。
-
-### 3.5 MCP 兜底（浏览器不可用时）
-
-- `https://mcp.mindflow.cn/api/mcp`，`Authorization: Bearer <JWT>`（key 在 `发明人/发明人key.txt`，凭据不进 skill/日志）
-- JSON-RPC over HTTP POST，无状态；响应是 SSE 文本，只解析 `data:` 行；`result.structuredContent` 是对象，`result.content[0].text` 是同内容 JSON 字符串（别二次解析）
-- 每次 tools/call 收 10 积分；连续快调约 10 次触发限流 → 间隔 ≥2.5s + 指数退避
-
-```python
-import json, re, time, urllib.request
-
-def mcp_call(expr, max_results=1000):
-    key = open("/mnt/c/Users/Arvin/Desktop/yunjia/非正常/发明人/发明人key.txt",
-               encoding="utf-8").read().strip()
-    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
-        "params": {"name": "patent_expression_search",
-                    "arguments": {"expression": expr, "max_results": max_results}}},
-        ensure_ascii=False).encode()
-    req = urllib.request.Request("https://mcp.mindflow.cn/api/mcp", data=body,
-        method="POST", headers={"Authorization": "Bearer " + key,
-        "Content-Type": "application/json",
-        "Accept": "application/json, text/event-stream"})
-    for attempt in range(8):
-        try:
-            raw = urllib.request.urlopen(req, timeout=300).read().decode()
-            res = json.loads(re.search(r"data: (\{.*\})", raw, re.S).group(1))["result"]
-            if not res.get("isError"):
-                return res["structuredContent"]
-            txt = res["content"][0]["text"]
-            if "mcp_rate_limited" in txt:
-                time.sleep(4 + 2 * attempt); continue
-            raise RuntimeError(txt[:300])
-        except OSError:
-            time.sleep(5)
-    raise RuntimeError("重试用尽")
-```
-
-检索式（MCP 语法）：
-```
-IN:(姓名)                                   # 全部年限
-IN:(姓名) AND APD:[YYYY0101 TO YYYYMMDD]    # 当年（溢出时）
-IN:(姓名) NOT ALL_AN:(本案申请人)            # 反查异申请人（溢出时）
-```
-- `IN:()` 是**子串匹配**；`PA:`/`AP:`/`AS:` 不存在，申请人字段是 `ANS`/`ALL_AN`
-- 多人逐名 `IN:(a) OR IN:(b)`；序号写法 `IN:(1) OR IN:(2)` 会静默错检
-- 计数三步：剥序号 → 只取 `inventors[0]` 全等 → 按申请号去重（raw total 不能当件数）
-
-### 3.6 落缓存
-
-两套取数结果都写同一个键，存**原始数据**不存派生结论：
-
-```json
-{"金锐博": {
-  "expr_ytd": "IN:(金锐博) AND APD:[20260101 TO 20261104]",
-  "ytd_groups": 1, "ytd_records": 1, "ytd_method": "preview",
-  "expr_all": "IN:(金锐博)", "all_groups": 16, "all_records": 19,
-  "rows": [{"pub": "CN121632333A", "app_date": "2026-02-05",
-            "applicants": ["湖南师范大学"], "app_no": "CN202610162388.8"}],
-  "_fetched": "2026-11-04", "_source": "browser"}}
-```
+- **件数按申请号去重**：条数会因一案双申、A/B 文虚高。
+- **常见名**：窗口内 >1000 条 → 标「常见名，计数不可采信 → pending」，不逐条拉全量。
+- **公开滞后**：窗口内新申请可能未公开，计数是下限，方向偏松，报告标注。
+- 跨机构判定用结果行「申请人」列；异申请人名单写进报告。
 
 ## 4. 缓存协议
 
@@ -279,7 +213,7 @@ python3 scripts/cache.py prune --max-age 365
 
 ## 5. 凭据
 
-- 企查查 Key、天眼查 token、mindflow JWT、香橼树账号：**不写入 skill、不提交仓库、不进日志**
+- 企查查 Key、天眼查 token、香橼树账号、incoPat 账号：**不写入 skill、不提交仓库、不进日志**
 - 缺凭据 → 该维标「待核查」，说明缺什么，让用户补
 
 ## 6. 排错
@@ -290,7 +224,7 @@ python3 scripts/cache.py prune --max-age 365
 | `applicants` 为空 | grep 全文有无 (71)/(73)；实用新型是 (73) 专利权人 |
 | 改了脚本但结果没变 | 加了 `--force` 没？缓存按文件大小命中 |
 | `cache.py get` 一直 exit 1 | `list` 看键名是否完全一致（公司全名/姓名一字不差） |
-| mindflow 401 | key 过期，找服务方换 |
+| incoPat 未登录 | 打开检索页跳转登录页 → 先在浏览器登录账号 |
 | 香橼树表格空白 | 刷新一次；确认已登录该账号 |
 | 天眼查 402 | 切企查查 |
 
@@ -311,80 +245,57 @@ python3 scripts/build_report.py <cases目录> -o report
 
 ---
 
-# 星河智源取数（字段码 / 检索式 / 剔重名）
+# incoPat 取数（字段码 / 检索式 / 剔重名）
 
-## 8. 星河智源字段码（已对官方文档逐个核对）
+## 8. incoPat 字段码（指令检索）
 
-出处：<https://help.mindflow.cn/68be/71c0/f40e>（检索表达式字段和语法介绍）
+入口：<https://www.incopat.com/advancedSearch/init> 的「指令检索」输入框（`#textarea`）。
+语法：`字段=值`，值用圆括号包裹；**日期区间用方括号** `AD=[起 TO 止]`。
+不支持 `AD>=20261109`、`AD=[* TO 20261109]`（报「检索式解析错误」）；无起点时用足够早的日期，如 `AD=[19850101 TO 基准日]`。
 
 | 用途 | 字段码 | 示例 |
 |---|---|---|
-| 全部申请人 | `ALL_AN` | `ALL_AN:(天津德吾安环境修复有限公司)` |
-| 精确申请人 | `ANC_EXACT` | `ANC_EXACT:(…)` |
-| 标准化申请人 | `ANCS` | `ANCS:(…)` |
-| 授权时专利权人 | `GRAS` | `GRAS:(…)`（授权公告版本上的权利人） |
-| 发明人（任意位次） | `IN` | `IN:(谢建政)` |
-| 第一发明人 | `F_IN` | `F_IN:(谢建政)` |
-| 专利类型 | `PATENT_TYPE` | 值：`发明专利` / `实用新型` / `外观设计` |
-| 法律状态 | `SIMPLE_LEGAL_STATUS` | 值含：授权、实审、公开、驳回、撤回、终止、届满、放弃、部分无效、全部无效… |
-| 授权日 | `ISD` | `ISD:[* TO 20261109]`（有值=曾获授权，最稳） |
-| 申请日 | `APD` | `APD:[20251110 TO 20261109]` |
-| 标题 | `TTL` | `TTL:(防尘开槽器)` |
-| 摘要 | `ABST` | `ABST:(喷淋防尘机构)` |
-| 技术领域 | `DESC_F` | `DESC_F:(…)` |
-| 申请(专利权)人数量 | `ANC_COUNT` | `ANC_COUNT:[3 TO 9]` |
+| 申请人 | `AP` | `AP=(天津德吾安环境修复有限公司)` |
+| 发明（设计）人 | `IN` | `IN=(谢建政)` |
+| 代理人 | `AT` | `AT=(童淑霞)` |
+| 代理机构 | `AGC` | |
+| 标题 | `TI` | `TI=(防尘开槽器)` |
+| 摘要 | `AB` | `AB=(喷淋防尘机构)` |
+| 标题摘要 | `TIAB` | |
+| 权利要求 | `CLAIM` | |
+| 说明书 | `DES` | |
+| 主要著录信息 | `ALL` | 简单检索框默认落成 `ALL=(关键词)` |
+| 公开（公告）号 | `PN` | `PN=(CN213625156U)` |
+| 申请号 | `AN` | |
+| 国际 IPC 分类 | `IPC` | |
+| CPC 分类 | `CPC` | |
+| 申请日 | `AD` | `AD=[20251110 TO 20261109]` |
+| 公开（公告）日 | `PD` | |
+| 法律状态文字 | `LG` | |
+| 专利有效性 | `STATUS` | |
+| 当前法律状态 | `STATUS-LITE` | |
 
-**已验证可用的组合检索式**（2026-11-09 实测）：
+专利类型不走字段码：检索页左侧「数据范围」勾选发明申请/发明授权/实用新型/外观，结果页左侧再按类型分组统计（「发明授权(N)」即授权发明文本数）。
 
-```text
-# 1.1 授权发明专利：申请人到基准日有无授权发明（0 积分，看"当前检索共 N 条"）
-ALL_AN:(申请人) AND PATENT_TYPE:(发明专利) AND ISD:[* TO 基准日]
+## 9. 剔重名取数（1.2 核心）：结果行 + 共同发明人反查
 
-# 只算"授权那一刻就是它"（排掉受让取得）
-GRAS:(申请人) AND PATENT_TYPE:(发明专利) AND ISD:[* TO 基准日]
+incoPat 结果行自带申请号、申请日、公开日、标题、申请人、IPC、类型，**不再需要跨源按申请号 join**。
 
-# 当前仍有效的授权发明（注意：专利终止后状态会变，会漏算，仅作交叉校验）
-ALL_AN:(申请人) AND PATENT_TYPE:(发明专利) AND SIMPLE_LEGAL_STATUS:(授权)
+| 要的字段 | 来源 |
+|---|---|
+| 申请号 / 申请日 / 公开日 / 标题 / 申请人 / IPC / 类型 | 结果行（`inco_client.parse_row`） |
+| 共同发明人 | **反查法**：对本案其余发明人各跑一次 `IN=(姓名) AND AD=[窗口起 TO 窗口止]`，与候选记录按申请号求交集；交集内即含共同发明人 |
 
-# 授权实用新型（仅作参考，不替代 1.1）
-ALL_AN:(申请人) AND PATENT_TYPE:(实用新型) AND ISD:[* TO 基准日]
-```
+反查替代了「读记录的发明人名单」——结果行默认不显示发明人，勾选「显示字段 → 发明(设计)人」在自动化下会被页面反复打断，不纳入脚本流程。
 
-实测样例（2026-11-09）：
+判定逻辑仍是 `rules/20-inventor.md` §2：有共同发明人重合（非常见名）→ 保留；否则按 IPC 领域兜底。
 
-| 申请人 | 授权发明 | 授权实用新型 |
-|---|---:|---:|
-| 天津德吾安环境修复 | 0 | 20 |
-| 天津市嵘通视觉文化 | 0 | 0（名下专利 0） |
-| 中科东南（陕西）环保科技 | 0 | 9 |
-| 埃里克阀业（江苏） | 0 | 22 |
-
-## 9. 剔重名取数（1.2 核心）：两个源按申请号 join
-
-**问题**：MCP 的记录**没有 IPC**，浏览器的结果表**没有发明人列表**，两边各缺一半。
-
-| 要的字段 | 从哪取 | 成本 |
-|---|---|---|
-| `application_number` / `application_date` / `title` / `inventors` / `current_applicants` / `original_applicants` | MCP `patent_expression_search` | 10 积分/次（一次拿一个发明人的全部记录） |
-| `ipc`（主分类） | 星河智源浏览器「融合检索」结果表 | 0 积分 |
-
-做法：同一检索式两边各跑一次，按 `application_number` 连接成一张表，再判重名。
-
-MCP 单条记录字段（实测固定，`selected_fields` 参数不被接受）：
-
-```text
-publication_number / application_number / application_date / title
-current_applicants / original_applicants / inventors
-```
-
-**常见名名单**（`common_names`，出现在共同发明人里不作身份锚）：
+**常见名名单**（`common_names`，不作身份锚）：
 
 ```text
 张伟 王伟 王芳 李娜 刘洋 李伟 王静 张敏 李静 王秀英 张丽 李秀英
 刘伟 王强 张杰 李强 王勇 张军 李军 王杰 张勇 李勇 刘杰 王涛
 ```
-
-名单可扩展；判定逻辑见 `rules/20-inventor.md` §2.2。
 
 ## 10. 企业资质（专精特新，豁免依据）
 
@@ -434,7 +345,7 @@ qcc operation get_honor_info "<申请人全名>" --json
 | `company` | 申请人全名 | 参保/经营范围/行业/法人/地址 | 90 天 |
 | `company_rd` | 申请人全名 | 授权发明专利件数 + 检索式 + 基准日 | 90 天 |
 | `company_honor` | 申请人全名 | 荣誉列表（名称/级别/年份） | 90 天 |
-| `inventor` | 第一发明人姓名 | 原始记录（inventors/applicants/ipc）+ 检索式 | 7 天 |
+| `inventor` | 第一发明人 + 窗口 + 共同发明人集合 | 原始记录（co_inventors/applicants/ipc）+ 检索式 | 7 天 |
 | `inventor_identity` | 发明人 + 本案申请人 | 剔重名结果（保留/剔除 + 理由） | 7 天 |
 | `agent_month` | `姓名\|窗口锚点` | 滚动 12 个月：value / window / months / ytd_2026 / _schema=2 | 1 天 |
 | `prior_art` | 检索式哈希 | 合并去重后的候选对比文件（含公开日/申请日/申请人） | 7 天 |
@@ -452,15 +363,15 @@ qcc operation get_honor_info "<申请人全名>" --json
 
 | 路 | 工具 | 成本 | 说明 |
 |---|---|---|---|
-| 布尔 | `patent_expression_search` | 10 积分/次 | `ABST:(领域词) AND ABST:(功能词)` 或 `TTL:(…)`；至少两组：精确组（专有词）+ 上位组（功能词） |
-| 语义 | `semantic_patent_search` | 10 积分/次 | 输入「独权原文 + 创新点清单」，取 top 10 |
-| 权项 | `patent_claims` | 10 积分/篇 | 只对最接近的 3 篇取（批量上限 100 篇/次） |
+| 布尔 | 指令检索 `AB=(…)` / `TI=(…)` | 0 接口成本（浏览器） | 至少两组：精确组（专有词）+ 上位组（功能词）；见 §13.2 |
+| 语义 | 语义检索页输入技术文本 | 0 接口成本（浏览器） | 结果带相关度百分比，取前若干篇 |
+| 权项 | 结果页「显示字段」勾选「首项权利要求(中文)」后读该行字段 | 0 接口成本 | 只对最接近的 3 篇取；未勾选读不到 → 该维标 pending |
 
 **实测教训（2026-11-09，必须写进报告的理由）**：
 
 | 案 | 语义 top10 命中情况 | 布尔命中情况 |
 |---|---|---|
-| 空分冷箱扒珠光砂 | **全不相关**（气流粉碎、储煤筒仓惰化） | `ABST:(珠光砂) AND ABST:(空分)` → 61 篇，`TTL:(扒砂装置)` → 5 篇精确命中 |
+| 空分冷箱扒珠光砂 | **全不相关**（气流粉碎、储煤筒仓惰化） | `AB=(珠光砂) AND AB=(空分)` → 61 篇，`TI=(扒砂装置)` → 5 篇精确命中 |
 | BYD 稀 PA 精馏 | 命中 CN122479428A、CN112521252A（够用） | 备用 |
 
 结论：**语义检索在冷门领域会漏，布尔检索在表述差异大时会漏；两路都跑，交叉取并集。**
@@ -469,17 +380,17 @@ qcc operation get_honor_info "<申请人全名>" --json
 
 ```text
 # 精确组：领域专有词
-ABST:(珠光砂) AND ABST:(空分)
-TTL:(扒砂装置)
+AB=(珠光砂) AND AB=(空分)
+TI=(扒砂装置)
 
 # 上位组：功能词
-ABST:(粉料) AND ABST:(密闭输送) AND ABST:(负压)
-ABST:(惰化) AND ABST:(除尘) AND ABST:(防爆)
+AB=(粉料) AND AB=(密闭输送) AND AB=(负压)
+AB=(惰化) AND AB=(除尘) AND AB=(防爆)
 ```
 
 - 关键词带同义词与上下位词（扒砂/扒除/卸砂；珠光砂/膨胀珍珠岩）
-- 时间窗：`AND APD:[* TO 本案申请日]`（无申请日则用查询日），把晚于本案的文件排除
-- 领域词写不出来时，用 `ai_patent_search_elements`（按特征表生成关键词/IPC，注意计费）或先跑语义再回捞同义表述
+- 时间窗：`AND AD=[19850101 TO 本案申请日]`（无申请日则用查询日），把晚于本案的文件排除；`[* TO …]` 会被判解析错误
+- 领域词写不出来时，用 incoPat「智能检索式」（自然语言转检索式）或先跑语义检索再回捞同义表述
 
 ### 13.3 特征覆盖度怎么算（判据见 `rules/50` §3b）
 
