@@ -297,6 +297,8 @@ python3 scripts/build_report.py <cases目录> -o report
 - PDF 中文字体：依次找 `PATENT_REPORT_FONT` → `C:\Windows\Fonts\simhei.ttf` → `Deng.ttf` → Noto CJK。找不到字体时**只出 md 并明确报错**，不会静默生成乱码 PDF。
 - 依赖 `fpdf2`（`pip install fpdf2`）。
 - 只产出 md 和 pdf 两个文件，不生成 xlsx/csv。
+- 报告格式固定为「总览 + 逐件结论」：总览一行件数 + 一行不过项分布；逐件一行标题（序号 · 案件名 · 申请人 · 不过/过）+ 不过原因整句。
+  **不写**附注、数据来源、复核项、取数成本，**不出现**「待核查」与 ①②⑥ / 型A型B / 阈值编号等内部代号（标准见 `SKILL.md` 第五节）。
 
 ---
 
