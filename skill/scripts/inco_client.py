@@ -3,7 +3,9 @@
 
 前置条件：
   1. bsk daemon 在跑（`bsk status` 有 daemon version）。
-  2. 浏览器已登录 incoPat 账号（账号密码或 IP 登录均可），且能看到「检索」菜单。
+  2. 浏览器能登录 incoPat：已登录则直接复用；未登录时脚本读凭据文件自动登录
+     （默认 ~/.incopat/credential，权限 600，可用 INCOPAT_CREDENTIAL_FILE 覆盖）。
+     凭据文件由 `scripts/inco_login.py --save` 生成，不进 skill、不进仓库、不进日志。
 
 口径：
   - 表达式检索走「指令检索」：https://www.incopat.com/advancedSearch/init 的 #textarea。
@@ -25,6 +27,10 @@ CACHE = os.environ.get("PATENT_CACHE_DIR", "cache")
 SID_FILE = os.path.join(CACHE, ".bsk_session")
 TAB_FILE = os.path.join(CACHE, ".bsk_inco_tab")
 
+CRED_FILE = os.environ.get(
+    "INCOPAT_CREDENTIAL_FILE",
+    os.path.join(os.path.expanduser("~"), ".incopat", "credential"))
+
 ADV = "https://www.incopat.com/advancedSearch/init"
 SEM = "https://www.incopat.com/semanticSearch/init"
 HOME = "https://www.incopat.com/"
@@ -32,6 +38,9 @@ HOME = "https://www.incopat.com/"
 
 class IncoError(RuntimeError):
     pass
+
+
+_LOGIN_CHECKED = False
 
 
 def _bsk(*args, timeout: int = 240) -> dict:
@@ -131,6 +140,113 @@ def js(code: str, sid: str | None = None, tid: str | None = None,
             last = {"_err": str(e)[:200]}
             time.sleep(2 + 2 * i)
     return last if isinstance(last, dict) else {"_err": str(last)[:200]}
+
+
+# ---------------------------------------------------------------- 登录
+
+def load_credential() -> tuple[str, str] | None:
+    """读凭据文件，返回 (账号, 密码)；文件不存在或格式不对返回 None。"""
+    if not os.path.exists(CRED_FILE):
+        return None
+    try:
+        d = json.load(open(CRED_FILE, encoding="utf-8"))
+    except Exception:
+        return None
+    u, p = (d.get("user") or "").strip(), (d.get("password") or "").strip()
+    return (u, p) if u and p else None
+
+
+def save_credential(user: str, password: str, path: str | None = None) -> str:
+    """写凭据文件，权限 600。"""
+    path = path or CRED_FILE
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        json.dump({"user": user, "password": password}, f, ensure_ascii=False)
+    os.replace(tmp, path)
+    os.chmod(path, 0o600)
+    return path
+
+
+def _fill(sel: str, value: str, sid: str, tid: str) -> dict:
+    """原生输入（触发页面事件），登录表单用这个而不是 JS 赋值。"""
+    ctx, obs = _sync(sid, tid)
+    return _bsk("fill", "--session", sid, "--tab-id", tid, "--context", ctx,
+                "--observation", obs, "--selector", sel, "--value", value, "--json")
+
+
+def is_logged_in(user: str | None = None, sid: str | None = None,
+                 tid: str | None = None) -> bool:
+    """判断浏览器是否已登录 incoPat：首页出现账号名，或检索页没有被重定向到登录页。"""
+    sid = sid or session()
+    tid = tid or tab(sid)
+    code = ("JSON.stringify({url:location.href,"
+            "body:document.body.innerText.slice(0,400)})")
+    d = js(code, sid, tid)
+    body = d.get("body") or ""
+    url = d.get("url") or ""
+    if "newLogin" in url or "login" in url.lower():
+        return False
+    if user:
+        return user in body
+    # 无账号名可比时：首页有「检索/帮助中心」且没有「登录」按钮即可视为已登录
+    return ("帮助中心" in body) and ("登录" not in body[:80])
+
+
+def login(user: str, password: str, sid: str | None = None,
+          tid: str | None = None) -> dict:
+    """走账号登录表单：/newLogin → #u / #p → input.try。"""
+    sid = sid or session()
+    tid = tid or tab(sid)
+    goto("https://www.incopat.com/newLogin", wait=3, sid=sid, tid=tid)
+    end = time.time() + 25
+    while time.time() < end:
+        d = js("JSON.stringify({u:!!document.getElementById('u'),"
+               "p:document.querySelectorAll('input[type=password]').length})", sid, tid, attempts=1)
+        if d.get("u") and d.get("p"):
+            break
+        time.sleep(2)
+    else:
+        return {"ok": False, "error": "登录页未就绪（找不到账号/密码输入框）"}
+
+    _fill("#u", user, sid, tid)
+    _fill("#p", password, sid, tid)
+    d = js("(()=>{const b=document.querySelector('input.try');"
+           "if(!b)return JSON.stringify({error:'no login button'});"
+           "b.click();return JSON.stringify({ok:1});})()", sid, tid)
+    if d.get("error"):
+        return {"ok": False, "error": d["error"]}
+    time.sleep(10)
+    ok = is_logged_in(user, sid, tid)
+    return {"ok": ok, "user": user, "url": js("location.href", sid, tid).get("_text")
+            if not ok else None}
+
+
+def ensure_login(force: bool = False) -> dict:
+    """取数前调用：已登录直接过；未登录且凭据文件存在则自动登录。"""
+    cred = load_credential()
+    user = cred[0] if cred else None
+    if not force and is_logged_in(user):
+        return {"ok": True, "action": "already"}
+    if not cred:
+        return {"ok": False, "action": "need_credential",
+                "error": f"未登录且无凭据文件（{CRED_FILE}）。先跑 "
+                         f"`python3 scripts/inco_login.py --save` 或在浏览器手动登录。"}
+    r = login(cred[0], cred[1])
+    r["action"] = "login"
+    return r
+
+
+def _ensure_once():
+    """同一进程内只做一次登录检查，避免每次检索都多一次页面读写。"""
+    global _LOGIN_CHECKED
+    if _LOGIN_CHECKED:
+        return
+    r = ensure_login()
+    if not r.get("ok"):
+        raise IncoError(r.get("error") or "incoPat 未登录且无法自动登录")
+    _LOGIN_CHECKED = True
 
 
 def goto(url: str, wait: float = 8.0, sid: str | None = None, tid: str | None = None):
@@ -277,6 +393,7 @@ def search(expr: str, wait: float = 10.0, all_pages: bool = False,
 
     all_pages=True 时把每页调到 page_size 并翻页取完（上限 max_pages 页）。
     """
+    _ensure_once()
     sid = session()
     tid = tab(sid)
     goto(ADV, wait=3, sid=sid, tid=tid)
@@ -380,6 +497,7 @@ _READ_SEM = """(function(){
 
 def semantic(text: str, wait: float = 14.0) -> dict:
     """语义检索：输入技术文本，返回带相关度的候选与统计。"""
+    _ensure_once()
     sid = session()
     tid = tab(sid)
     goto(SEM, wait=8, sid=sid, tid=tid)

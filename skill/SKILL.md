@@ -17,7 +17,7 @@ description: Use when the user supplies Chinese patent application text (PDF 公
 
 0. **先查缓存再取数。** 取数前依次查三处：项目根 `./cache/`（`company` / `agent_month` / `inventor` / `docx` / `pdf`）、`results/` 下同一批次的既有结果、skill 包内 `cache/` 与 `scripts/cache/`。
    命中条件：`_schema` 与当前口径一致，且在有效期内。不满足按未命中处理，重新取数；取数完成后用 `cache.py set` 写回。报告标注「缓存值（原始取数日）」。
-   细则见 `data-sources.md` §4（缓存协议）与 §12（缓存命名空间）。外部取数走 incoPat 浏览器：取数前浏览器须已登录 incoPat 账号。
+   细则见 `data-sources.md` §4（缓存协议）与 §12（缓存命名空间）。外部取数走 incoPat 浏览器，首次检索时脚本自动登录（凭据在 `~/.incopat/credential`，见 `data-sources.md` §5.1）；缺凭据时提示先 `inco_login.py --save`。
 1. **全维判定**：11 个维度每项都要出结论，任一维不过（且未被豁免）→ 非正常。
 2. **不因"已定案"跳过维度**：已有一维不过，其余维照常取数、照常记录。省成本靠缓存，不靠短路。
 3. **数据拿不到 → 待核查**：不默认通过（漏判），也不凭空判不过（误伤）。

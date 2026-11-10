@@ -216,6 +216,25 @@ python3 scripts/cache.py prune --max-age 365
 - 企查查 Key、天眼查 token、香橼树账号、incoPat 账号：**不写入 skill、不提交仓库、不进日志**
 - 缺凭据 → 该维标「待核查」，说明缺什么，让用户补
 
+### 5.1 incoPat 自动登录
+
+凭据文件：默认 `~/.incopat/credential`（权限 600），可用 `INCOPAT_CREDENTIAL_FILE` 覆盖。
+格式 `{"user": "...", "password": "..."}`，由脚本写入，不进项目目录。
+
+```bash
+python3 scripts/inco_login.py --save --user <账号>      # 交互输入密码，不回显
+python3 scripts/inco_login.py --status                  # 看文件是否存在、权限、账号（不显示密码）
+python3 scripts/inco_login.py --check                   # 检查并完成登录
+```
+
+取数脚本在首次检索时调用 `inco_client.ensure_login()`：
+
+1. 已登录 → 直接取数，不动页面；
+2. 未登录且凭据文件存在 → 自动走 `/newLogin`（填 `#u` / `#p`，点 `input.try`），登录后继续；
+3. 未登录且无凭据 → 报错并提示先跑 `inco_login.py --save`。
+
+登录态存在浏览器 profile 里，同一浏览器下次开窗通常仍在；凭据文件只在退出登录后起作用。
+
 ## 6. 排错
 
 | 现象 | 处理 |
@@ -224,7 +243,7 @@ python3 scripts/cache.py prune --max-age 365
 | `applicants` 为空 | grep 全文有无 (71)/(73)；实用新型是 (73) 专利权人 |
 | 改了脚本但结果没变 | 加了 `--force` 没？缓存按文件大小命中 |
 | `cache.py get` 一直 exit 1 | `list` 看键名是否完全一致（公司全名/姓名一字不差） |
-| incoPat 未登录 | 打开检索页跳转登录页 → 先在浏览器登录账号 |
+| incoPat 未登录 | 有凭据文件时脚本会自动登录；报 `need_credential` 就先跑 `inco_login.py --save` |
 | 香橼树表格空白 | 刷新一次；确认已登录该账号 |
 | 天眼查 402 | 切企查查 |
 
