@@ -1,6 +1,6 @@
 ---
 name: patent-abnormal-screening
-description: Use when the user supplies Chinese patent application text (PDF 公开文本 or Word 正文) and asks whether it is 非正常申请 (abnormal filing) under CNIPA Order No.77 — 判断"正常/非正常""非正常申请""77号令筛查"时。全维口径：申请人资质与有无授权发明专利、发明人件数（剔重名）、跨机构申请、代理师代理量、技术领域、撰写、多件相似、违法公德；含专精特新豁免。外部取数先查本地 cache，不重复花额度。
+description: Use when the user supplies Chinese patent application text (PDF 公开文本 or Word 正文) and asks whether it is 非正常申请 (abnormal filing) under CNIPA Order No.77 — 判断"正常/非正常""非正常申请""77号令筛查"时。全维口径：申请人资质与授权发明专利、发明人件数（剔重名）、跨机构申请、代理师代理量、技术领域、撰写、多件相似、违法公德；含专精特新豁免。外部取数先查本地 cache，不重复花额度。
 ---
 
 # 专利非正常申请筛查
@@ -41,7 +41,7 @@ description: Use when the user supplies Chinese patent application text (PDF 公
          └ 未命中 → 企业类维度正常判
 第 1.5 步 申请人维度（rules/10-applicant.md）：
          ①类型 / ①科技属性 / ①社保（T01）/ ①主营匹配
-         1.1 有无授权发明专利（T02）：每案都判——到本案申请日授权发明专利 ≥1 → 过；0 件 → 非正常
+         1.1 授权发明专利（T02）：每案都判——到本案申请日授权发明专利 ≥1 → 过；0 件 → 非正常
 第 2 步  文本维（免费）：③四类归类、④撰写、违法公德
          ③：非四类 → 直接过（不看创新度）；生活类/计算机算法 → 不过；
              机械装置/方法步骤图的系统 → 转第 2.5 步
@@ -76,7 +76,7 @@ description: Use when the user supplies Chinese patent application text (PDF 公
 | ①科技属性 | 名称/经营范围 | 强/弱科技属性 | 无研发类业务 | ✅ | 同上 |
 | ①社保 | 企查查 | ≥10 人（3–10 灰区） | <3 人 | ✅ | 同上 |
 | ①主营匹配 | 技术对象 × 经营范围 | 一致/相邻 | 无关 | ✅ | 同上 |
-| 1.1 有无授权发明专利 | 星河智源 | 授权发明专利 ≥1 | 0 件 | ✅ | 同上 |
+| 1.1 授权发明专利 | 星河智源 | 授权发明专利 ≥1 | 0 件 | ✅ | 同上 |
 | 发明人件数 | 星河智源 | 剔重名后 <5 件 | ≥5 件 | ❌ | `rules/20-inventor.md` |
 | 跨机构（2.1） | 星河智源 + 企查查 | 关联聚组 1–2 组 | 无关联组数 ≥3 | ❌ | `rules/30-cross-org.md` |
 | ②代理量 | 香橼树 | <300 件/12 月 | ≥300 件 | ❌ | `rules/40-agency.md` |

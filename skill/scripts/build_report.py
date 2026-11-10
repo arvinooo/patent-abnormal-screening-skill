@@ -33,15 +33,15 @@ DIMS = [
     "⑥多件相似", "违法公德",
 ]
 DIMS_V2 = [
-    "①类型", "①科技属性", "①社保", "①主营匹配", "有无授权发明专利",
+    "①类型", "①科技属性", "①社保", "①主营匹配", "授权发明专利",
     "发明人件数", "跨机构", "②代理量",
     "③技术领域", "④撰写", "⑥多件相似", "违法公德",
 ]
-DIM_ALIAS = {"研发能力": "有无授权发明专利"}
+DIM_ALIAS = {"研发能力": "授权发明专利", "有无授权发明专利": "授权发明专利"}
 
 SHORT_LABEL = {
     "①类型": "申请人类型", "①科技属性": "科技属性", "①社保": "社保人数",
-    "①主营匹配": "主营匹配", "有无授权发明专利": "授权发明专利",
+    "①主营匹配": "主营匹配", "授权发明专利": "授权发明专利",
     "发明人件数": "发明人申请件数", "跨机构": "发明人跨机构申请",
     "②代理量": "代理师代理量", "③技术领域": "技术领域创新度", "④撰写": "撰写布局",
     "⑥多件相似": "多件相似", "违法公德": "违法公德",
@@ -98,7 +98,7 @@ def pick_dims(cases):
     keys = set()
     for c in cases:
         keys.update((c.get("dims") or {}).keys())
-    return DIMS_V2 if ("有无授权发明专利" in keys or "发明人件数" in keys) else DIMS
+    return DIMS_V2 if ("授权发明专利" in keys or "发明人件数" in keys) else DIMS
 
 
 def compute(cases, dims):
@@ -119,37 +119,34 @@ def _brief_reason(c, dim):
 
 def _fails(c, dims):
     """不过原因：只给一句人话，前面不加维度代号。"""
-    return [_brief_reason(c, d) for d in dims if c["dims"].get(d) == "fail"]
-
-
-def _pends(c, dims):
-    return [SHORT_LABEL.get(d, d) for d in dims if c["dims"].get(d) == "pending"]
+    out = [_brief_reason(c, d) for d in dims if c["dims"].get(d) == "fail"]
+    if not out and c["conclusion"] != "正常":
+        out = ["关键数据缺失，未取得可放行的证据"]
+    return out
 
 
 def _verdict(c):
-    return {"非正常": "不过", "正常": "过", "待核查": "待核查"}.get(c["conclusion"], c["conclusion"])
+    """报告只有两态：非正常=不过，其余（含数据缺失）=过不了就写不过，不出现第三态。"""
+    return "过" if c["conclusion"] == "正常" else "不过"
 
 
 def build_md(cases, batch, out_base, dims, stat, concl):
     n = len(cases)
+    n_pass = n - concl["非正常"]
     now = time.strftime("%Y-%m-%d %H:%M")
     L = []
     L.append("# %s\n" % (batch.get("title") or "专利非正常申请批量筛查报告"))
-    L.append("<sub>生成 %s · 案件 %d 件 · 判定口径：任一维不过 = 非正常，缺数据 = 待核查</sub>\n"
+    L.append("<sub>生成 %s · 案件 %d 件 · 判定口径：任一维不过 = 非正常</sub>\n"
              % (now, n))
 
     L.append("## 总览\n")
     L.append("| 结论 | 件数 |")
     L.append("|:---|---:|")
     L.append("| 不过 | %d |" % concl["非正常"])
-    L.append("| 过 | %d |" % concl["正常"])
-    L.append("| 待核查 | %d |\n" % concl["待核查"])
+    L.append("| 过 | %d |\n" % n_pass)
     fails = ["%s %d 件" % (SHORT_LABEL.get(d, d), stat[d]["fail"]) for d in dims if stat[d]["fail"]]
-    pends = ["%s %d 件" % (SHORT_LABEL.get(d, d), stat[d]["pending"]) for d in dims if stat[d]["pending"]]
     if fails:
         L.append("**不过项**　%s\n" % "　·　".join(fails))
-    if pends:
-        L.append("**待核查项**　%s\n" % "　·　".join(pends))
 
     L.append("## 逐件结论\n")
     for i, c in enumerate(cases, 1):
@@ -158,38 +155,7 @@ def build_md(cases, batch, out_base, dims, stat, concl):
         fs = _fails(c, dims)
         if fs:
             L.append("- **不过原因**：%s" % "；".join(fs))
-        ps = _pends(c, dims)
-        if ps:
-            L.append("- **待核查**：%s" % "、".join(ps))
         L.append("")
-
-    srcs = batch.get("sources") or {}
-    revs = [c for c in cases if c.get("review")]
-    if srcs or revs or batch.get("cost"):
-        L.append("## 附注\n")
-        if batch.get("note"):
-            L.append("**批次说明**\n")
-            L.append("> %s\n" % batch["note"])
-        if srcs:
-            L.append("**数据来源与取数日**\n")
-            for k, v in srcs.items():
-                L.append("- %s %s：%s" % (k, v.get("date", ""), v.get("note", "")))
-            L.append("")
-        if revs:
-            L.append("**复核项**\n")
-            group = {}
-            for c in revs:
-                group.setdefault(c["review"].strip(), []).append(label(c))
-            for txt, labels in group.items():
-                if len(labels) == 1:
-                    L.append("- %s：%s" % (labels[0], txt))
-                else:
-                    L.append("- %d 件：%s（%s%s）"
-                             % (len(labels), txt, "、".join(labels[:3]),
-                                " 等" if len(labels) > 3 else ""))
-            L.append("")
-        if batch.get("cost"):
-            L.append("**取数成本**　%s\n" % json.dumps(batch["cost"], ensure_ascii=False))
 
     with open(out_base + ".md", "w", encoding="utf-8") as f:
         f.write("\n".join(L) + "\n")
@@ -224,6 +190,7 @@ def build_pdf(cases, batch, out_base, dims, stat, concl):
             self.cell(0, 6, "第 %d / {nb} 页 · %s"
                       % (self.page_no(), time.strftime("%Y-%m-%d")), align="C")
 
+    n_pass = len(cases) - concl["非正常"]
     pdf = Report(orientation="P", unit="mm", format="A4")
     pdf.alias_nb_pages()
     pdf.set_margins(16, 16, 16)
@@ -287,17 +254,16 @@ def build_pdf(cases, batch, out_base, dims, stat, concl):
 
     pdf.add_page()
     h1(batch.get("title") or "专利非正常申请批量筛查报告")
-    para("生成时间 %s　·　案件 %d 件　·　判定口径：任一维不过 = 非正常，缺数据 = 待核查"
+    para("生成时间 %s　·　案件 %d 件　·　判定口径：任一维不过 = 非正常"
          % (time.strftime("%Y-%m-%d %H:%M"), len(cases)), 8.8, GREY)
     pdf.ln(2)
 
     h2("总览")
-    boxw = (W - 8) / 3
+    boxw = (W - 6) / 2
     y0 = pdf.get_y()
-    items = [("不过", concl["非正常"], RED), ("过", concl["正常"], GREEN),
-             ("待核查", concl["待核查"], GREY)]
+    items = [("不过", concl["非正常"], RED), ("过", n_pass, GREEN)]
     for i, (k, v, col) in enumerate(items):
-        x = pdf.l_margin + i * (boxw + 4)
+        x = pdf.l_margin + i * (boxw + 6)
         pdf.set_fill_color(*LIGHT)
         pdf.rect(x, y0, boxw, 15, style="F")
         pdf.set_font("CJK", "", 15)
@@ -311,11 +277,8 @@ def build_pdf(cases, batch, out_base, dims, stat, concl):
     pdf.set_y(y0 + 17)
 
     fails = ["%s %d 件" % (SHORT_LABEL.get(d, d), stat[d]["fail"]) for d in dims if stat[d]["fail"]]
-    pends = ["%s %d 件" % (SHORT_LABEL.get(d, d), stat[d]["pending"]) for d in dims if stat[d]["pending"]]
     if fails:
         para("不过项　" + "　·　".join(fails), 9.2, RED)
-    if pends:
-        para("待核查项　" + "　·　".join(pends), 9.2, GREY)
 
     h2("逐件结论")
     for i, c in enumerate(cases, 1):
@@ -335,40 +298,13 @@ def build_pdf(cases, batch, out_base, dims, stat, concl):
         pdf.ln(6)
         for val in _fails(c, dims):
             para("· " + val, 9.0, (60, 62, 66), 5.4, x=19)
-        ps = _pends(c, dims)
-        if ps:
-            para("· 待核查　" + "、".join(ps), 8.6, GREY, 5.2, x=19)
+
         pdf.ln(1.5)
         pdf.set_draw_color(*LIGHT)
         pdf.set_line_width(0.3)
         y = pdf.get_y()
         pdf.line(16, y, 16 + W, y)
         pdf.ln(2.5)
-
-    srcs = batch.get("sources") or {}
-    revs = [c for c in cases if c.get("review")]
-    if srcs or revs:
-        if pdf.get_y() > pdf.h - 55:
-            pdf.add_page()
-        h2("附注")
-        if batch.get("note"):
-            para("批次说明", 9.4, NAVY)
-            para(batch["note"], 8.6, (85, 88, 92), 5.2, x=19)
-            pdf.ln(1)
-        if srcs:
-            para("数据来源与取数日", 9.4, NAVY)
-            for k, v in srcs.items():
-                para("· %s %s　%s" % (k, v.get("date", ""), v.get("note", "")),
-                     8.6, (85, 88, 92), 5.2, x=19)
-            pdf.ln(1)
-        if revs:
-            para("复核项", 9.4, NAVY)
-            group = {}
-            for c in revs:
-                group.setdefault(c["review"].strip(), []).append(label(c))
-            for txt, labels in group.items():
-                head = labels[0] if len(labels) == 1 else "%d 件" % len(labels)
-                para("· %s：%s" % (head, txt), 8.6, (85, 88, 92), 5.2, x=19)
 
     pdf.output(out_base + ".pdf")
     return True, ""
@@ -397,8 +333,8 @@ def main(argv):
     print("md  ->", out + ".md")
     ok, why = build_pdf(cases, batch, out, dims, stat, concl)
     print(("pdf -> " + out + ".pdf") if ok else ("pdf 跳过：" + why))
-    print("非正常 %d / 正常 %d / 待核查 %d；不过项合计 %d"
-          % (concl["非正常"], concl["正常"], concl["待核查"],
+    print("非正常 %d / 正常 %d；不过项合计 %d"
+          % (concl["非正常"], concl["正常"],
              sum(stat[d]["fail"] for d in dims)))
     return 0
 

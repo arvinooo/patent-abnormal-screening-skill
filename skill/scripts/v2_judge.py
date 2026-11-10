@@ -60,11 +60,11 @@ def judge(case: dict, text_dims: dict | None = None, verbose: bool = False) -> d
     else:
         dims["发明人件数"] = "pass"
 
-    # ---------- 1.1 有无授权发明专利（申请人维度独立一条，每案都判）
+    # ---------- 1.1 授权发明专利（申请人维度独立一条，每案都判）
     base = (case.get("app_date") or "").replace("-", "") or dt.date.today().strftime("%Y%m%d")
     rd = F.granted_inventions(case["applicant"], base)
-    dims["有无授权发明专利"] = "pass" if rd.get("has") else ("fail" if rd.get("has") is False else "pending")
-    ev["有无授权发明专利"] = (f"到基准日 {base} 授权发明专利 {rd.get('granted_invention')} 件"
+    dims["授权发明专利"] = "pass" if rd.get("has") else ("fail" if rd.get("has") is False else "pending")
+    ev["授权发明专利"] = (f"到基准日 {base} 授权发明专利 {rd.get('granted_invention')} 件"
                       f"（基准：{'本案申请日' if case.get('app_date') else '查询日（本案无申请日）'}）")
 
     # ---------- 第 6 步：2.1 跨机构（复用 kept 集合）
