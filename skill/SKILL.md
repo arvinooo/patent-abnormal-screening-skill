@@ -82,7 +82,7 @@ description: Use when the user supplies Chinese patent application text (PDF 公
 | ②代理量 | 香橼树 | <300 件/12 月 | ≥300 件 | ❌ | `rules/40-agency.md` |
 | ③技术领域 | 文本（+ 仅四类内才检索） | 非四类一律过；机械装置/方法步骤图须创新度够（覆盖度<80% 或有实质差异） | 生活类、计算机算法；机械装置/方法步骤图中单篇覆盖≥80% 且差异为常见替换/公知常识、单篇100%、两篇拼凑 | ❌ | `rules/50-drafting.md` §3a–§3c |
 | ④撰写 | 文本 | 有多级布局 | 独权写死 | ❌ | 同上 |
-| ⑥多件相似 | 批内文本 | 不成组 / 跨产品 | 型A / 型B | ❌ | `rules/60-multi-similar.md` |
+| ⑥多件相似 | 批内文本 | 不成组 / 跨产品 | 复制型 / 拆分型 | ❌ | `rules/60-multi-similar.md` |
 | 违法公德 | 文本 | 无 | 违法/公德/公共利益 | ❌ | `rules/70-illegal.md` |
 
 阈值只在 `rules/00-thresholds.md` 维护，别处一律引用，不重复写数字。

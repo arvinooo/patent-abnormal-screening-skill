@@ -40,11 +40,12 @@ DIMS_V2 = [
 DIM_ALIAS = {"研发能力": "有无授权发明专利"}
 
 SHORT_LABEL = {
-    "①类型": "①类型", "①科技属性": "①科技属性", "①社保": "社保", "①主营匹配": "①主营",
-    "有无授权发明专利": "有无授权发明专利", "发明人件数": "发明人件数", "跨机构": "跨机构",
-    "②代理量": "②代理量", "③技术领域": "③技术领域", "④撰写": "④撰写",
-    "⑥多件相似": "⑥多件相似", "违法公德": "违法公德",
-    "⑤a当年件数": "⑤a", "⑤b一致性": "⑤b",
+    "①类型": "申请人类型", "①科技属性": "科技属性", "①社保": "社保人数",
+    "①主营匹配": "主营匹配", "有无授权发明专利": "授权发明专利",
+    "发明人件数": "发明人申请件数", "跨机构": "发明人跨机构申请",
+    "②代理量": "代理师代理量", "③技术领域": "技术领域创新度", "④撰写": "撰写布局",
+    "⑥多件相似": "多件相似", "违法公德": "违法公德",
+    "⑤a当年件数": "当年申请件数", "⑤b一致性": "申请人一致性",
 }
 CONCL = ("非正常", "正常", "待核查")
 
@@ -117,7 +118,8 @@ def _brief_reason(c, dim):
 
 
 def _fails(c, dims):
-    return [(SHORT_LABEL.get(d, d), _brief_reason(c, d)) for d in dims if c["dims"].get(d) == "fail"]
+    """不过原因：只给一句人话，前面不加维度代号。"""
+    return [_brief_reason(c, d) for d in dims if c["dims"].get(d) == "fail"]
 
 
 def _pends(c, dims):
@@ -155,7 +157,7 @@ def build_md(cases, batch, out_base, dims, stat, concl):
         L.append("### %d. %s · %s · %s\n" % (i, label(c), app, _verdict(c)))
         fs = _fails(c, dims)
         if fs:
-            L.append("- **不过原因**：%s" % "；".join("%s %s" % (k, v) for k, v in fs))
+            L.append("- **不过原因**：%s" % "；".join(fs))
         ps = _pends(c, dims)
         if ps:
             L.append("- **待核查**：%s" % "、".join(ps))
@@ -220,31 +222,46 @@ def build_pdf(cases, batch, out_base, dims, stat, concl):
             self.set_font("CJK", "", 8)
             self.set_text_color(*GREY)
             self.cell(0, 6, "第 %d / {nb} 页 · %s"
-                      % (self.page_no(), time.strftime("%Y-%m-%d")),
-                      align="C")
+                      % (self.page_no(), time.strftime("%Y-%m-%d")), align="C")
 
     pdf = Report(orientation="P", unit="mm", format="A4")
     pdf.alias_nb_pages()
     pdf.set_margins(16, 16, 16)
-    pdf.set_auto_page_break(auto=True, margin=18)
+    pdf.set_auto_page_break(auto=False)
     try:
         pdf.add_font("CJK", "", font)
     except Exception as e:  # noqa: BLE001
         return False, "字体加载失败 %s: %s" % (font, e)
 
-    W = pdf.w - 32
+    W = pdf.w - pdf.l_margin - pdf.r_margin
 
-    def text(t, size=9.5, color=(60, 62, 66), lh=None, x=None, w=None):
+    def _wrap(txt, width, size):
+        """按实际字宽逐字断行（中文没有空格，不能靠 word wrap）。"""
         pdf.set_font("CJK", "", size)
-        pdf.set_text_color(*color)
-        pdf.multi_cell(w or 0, lh or size * 0.62, t,
-                       new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="L")
+        out, cur = [], ""
+        for ch in txt:
+            if pdf.get_string_width(cur + ch) > width and cur:
+                out.append(cur)
+                cur = ch
+            else:
+                cur += ch
+        out.append(cur)
+        return out
+
+    def para(txt, size=9.5, color=(60, 62, 66), lh=None, x=16, width=None):
+        lh = lh or size * 0.62
+        width = width or (W - (x - pdf.l_margin))
+        for ln in _wrap(txt, width, size):
+            if pdf.get_y() + lh > pdf.h - pdf.b_margin:
+                pdf.add_page()
+            pdf.set_font("CJK", "", size)
+            pdf.set_text_color(*color)
+            pdf.set_x(x)
+            pdf.cell(width, lh, ln, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     def h1(t):
         pdf.ln(1)
-        pdf.set_font("CJK", "", 17)
-        pdf.set_text_color(*NAVY)
-        pdf.multi_cell(0, 9.5, t, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        para(t, 17, NAVY, 9.5)
         pdf.ln(1)
         pdf.set_draw_color(*NAVY)
         pdf.set_line_width(0.5)
@@ -254,37 +271,33 @@ def build_pdf(cases, batch, out_base, dims, stat, concl):
 
     def h2(t):
         pdf.ln(2.5)
-        pdf.set_font("CJK", "", 11.5)
-        pdf.set_text_color(*NAVY)
-        pdf.multi_cell(0, 6.5, t, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        para(t, 11.5, NAVY, 6.5)
         pdf.ln(0.5)
 
     def badge(txt, color, size=8):
         pdf.set_font("CJK", "", size)
         w = pdf.get_string_width(txt) + 6
-        x, y = pdf.get_x(), pdf.get_y()
+        x, y = pdf.get_x(), pdf.get_y() + 0.4
         pdf.set_fill_color(*color)
-        pdf.rect(x, y, w, 5.4, style="F")
+        pdf.rect(x, y, w, 5.2, style="F")
         pdf.set_text_color(255, 255, 255)
         pdf.set_xy(x, y)
-        pdf.cell(w, 5.4, txt, align="C")
+        pdf.cell(w, 5.2, txt, align="C")
         pdf.set_x(x + w + 2)
 
-    # 标题区
     pdf.add_page()
     h1(batch.get("title") or "专利非正常申请批量筛查报告")
-    text("生成时间 %s　·　案件 %d 件　·　判定口径：任一维不过 = 非正常，缺数据 = 待核查"
+    para("生成时间 %s　·　案件 %d 件　·　判定口径：任一维不过 = 非正常，缺数据 = 待核查"
          % (time.strftime("%Y-%m-%d %H:%M"), len(cases)), 8.8, GREY)
     pdf.ln(2)
 
-    # 总览：三块数字
     h2("总览")
     boxw = (W - 8) / 3
     y0 = pdf.get_y()
     items = [("不过", concl["非正常"], RED), ("过", concl["正常"], GREEN),
              ("待核查", concl["待核查"], GREY)]
     for i, (k, v, col) in enumerate(items):
-        x = 16 + i * (boxw + 4)
+        x = pdf.l_margin + i * (boxw + 4)
         pdf.set_fill_color(*LIGHT)
         pdf.rect(x, y0, boxw, 15, style="F")
         pdf.set_font("CJK", "", 15)
@@ -300,27 +313,19 @@ def build_pdf(cases, batch, out_base, dims, stat, concl):
     fails = ["%s %d 件" % (SHORT_LABEL.get(d, d), stat[d]["fail"]) for d in dims if stat[d]["fail"]]
     pends = ["%s %d 件" % (SHORT_LABEL.get(d, d), stat[d]["pending"]) for d in dims if stat[d]["pending"]]
     if fails:
-        text("不过项　" + "　·　".join(fails), 9.2, RED)
+        para("不过项　" + "　·　".join(fails), 9.2, RED)
     if pends:
-        text("待核查项　" + "　·　".join(pends), 9.2, GREY)
+        para("待核查项　" + "　·　".join(pends), 9.2, GREY)
 
-    # 逐件结论
     h2("逐件结论")
     for i, c in enumerate(cases, 1):
         app = (c.get("applicants") or [""])[0]
         v = _verdict(c)
         col = {"不过": RED, "过": GREEN}.get(v, GREY)
-        if pdf.get_y() > pdf.h - 42:
+        need = 22 + 4 * (len(_fails(c, dims)) + 1)
+        if pdf.get_y() + need > pdf.h - pdf.b_margin:
             pdf.add_page()
-        # 序号 + 名称
-        pdf.set_font("CJK", "", 10.2)
-        pdf.set_text_color(*NAVY)
-        num = "%d. " % i
-        pdf.set_x(16)
-        pdf.cell(pdf.get_string_width(num), 6.2, num)
-        pdf.multi_cell(W - pdf.get_string_width(num) - 16, 6.2, label(c),
-                       new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        # 申请人 + 结论徽标
+        para("%d.　%s" % (i, label(c)), 10.2, NAVY, 6.0)
         pdf.set_font("CJK", "", 8.4)
         pdf.set_text_color(*GREY)
         pdf.set_x(16)
@@ -328,15 +333,11 @@ def build_pdf(cases, batch, out_base, dims, stat, concl):
         pdf.cell(aw + 3, 5.2, app)
         badge(v, col)
         pdf.ln(6)
-        # 不过原因
-        for k, val in _fails(c, dims):
-            pdf.set_x(19)
-            text("· %s　%s" % (k, val), 9.0, (60, 62, 66), 5.4)
+        for val in _fails(c, dims):
+            para("· " + val, 9.0, (60, 62, 66), 5.4, x=19)
         ps = _pends(c, dims)
         if ps:
-            pdf.set_x(19)
-            text("· 待核查　" + "、".join(ps), 8.6, GREY, 5.2)
-        # 分隔
+            para("· 待核查　" + "、".join(ps), 8.6, GREY, 5.2, x=19)
         pdf.ln(1.5)
         pdf.set_draw_color(*LIGHT)
         pdf.set_line_width(0.3)
@@ -344,7 +345,6 @@ def build_pdf(cases, batch, out_base, dims, stat, concl):
         pdf.line(16, y, 16 + W, y)
         pdf.ln(2.5)
 
-    # 附注
     srcs = batch.get("sources") or {}
     revs = [c for c in cases if c.get("review")]
     if srcs or revs:
@@ -352,25 +352,23 @@ def build_pdf(cases, batch, out_base, dims, stat, concl):
             pdf.add_page()
         h2("附注")
         if batch.get("note"):
-            text("批次说明", 9.4, NAVY)
-            pdf.set_x(19)
-            text(batch["note"], 8.6, (85, 88, 92), 5.2)
+            para("批次说明", 9.4, NAVY)
+            para(batch["note"], 8.6, (85, 88, 92), 5.2, x=19)
             pdf.ln(1)
         if srcs:
-            text("数据来源与取数日", 9.4, NAVY)
+            para("数据来源与取数日", 9.4, NAVY)
             for k, v in srcs.items():
-                pdf.set_x(19)
-                text("· %s %s　%s" % (k, v.get("date", ""), v.get("note", "")), 8.6, (85, 88, 92), 5.2)
+                para("· %s %s　%s" % (k, v.get("date", ""), v.get("note", "")),
+                     8.6, (85, 88, 92), 5.2, x=19)
             pdf.ln(1)
         if revs:
-            text("复核项", 9.4, NAVY)
+            para("复核项", 9.4, NAVY)
             group = {}
             for c in revs:
                 group.setdefault(c["review"].strip(), []).append(label(c))
             for txt, labels in group.items():
-                pdf.set_x(19)
                 head = labels[0] if len(labels) == 1 else "%d 件" % len(labels)
-                text("· %s：%s" % (head, txt), 8.6, (85, 88, 92), 5.2)
+                para("· %s：%s" % (head, txt), 8.6, (85, 88, 92), 5.2, x=19)
 
     pdf.output(out_base + ".pdf")
     return True, ""
