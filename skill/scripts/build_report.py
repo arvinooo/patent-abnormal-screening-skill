@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
-"""批量筛查报告：cases/*.json -> report.md + report.pdf（含各维度命中统计）。
+"""批量筛查报告（简版）：cases/*.json -> report.md + report.pdf
 
 用法:
     python3 scripts/build_report.py <cases_dir> [-o report] [--title "标题"]
 
 输入:
-    <cases_dir>/<公开号>.json     每案一份（字段见 SKILL.md「输出」节）
-    <cases_dir>/_batch.json       可选，批次元信息：title / rules_version / sources / cost
+    <cases_dir>/<案件>.json   每案一份（字段见 SKILL.md「输出」节）
+    <cases_dir>/_batch.json   可选，批次元信息：title / rules_version / sources / cost / note
 
 输出:
-    <out>.md   总报告（Markdown，可 diff、可入库）
-    <out>.pdf  同内容排版件（A4，自动横排逐案表）
-只产出这两个文件，不生成 xlsx/csv。
+    <out>.md   总览 + 逐件结论（过/不过 + 不过原因）
+    <out>.pdf  同内容排版件
 
 字体: 依次尝试 PATENT_REPORT_FONT / Windows simhei.ttf / Deng.ttf / Noto CJK。
       找不到 CJK 字体时只写 md 并明确警告（不静默降级成乱码 PDF）。
@@ -33,24 +32,21 @@ DIMS = [
     "⑤a当年件数", "⑤b一致性",
     "⑥多件相似", "违法公德",
 ]
-# v2 维度（识别到案件里有"研发能力"就用这一套；否则沿用 v1）
 DIMS_V2 = [
-    "①类型", "①科技属性", "①社保", "①主营匹配", "研发能力",
+    "①类型", "①科技属性", "①社保", "①主营匹配", "有无授权发明专利",
     "发明人件数", "跨机构", "②代理量",
     "③技术领域", "④撰写", "⑥多件相似", "违法公德",
 ]
+# 旧 case JSON 里叫「研发能力」，读入时统一改名
+DIM_ALIAS = {"研发能力": "有无授权发明专利"}
 
-HEAD_SHORT = {  # 逐案表列名
-    "①类型": "①类型", "①科技属性": "①科技", "①社保": "①社保", "①主营匹配": "①主营",
-    "②代理量": "②代理", "③技术领域": "③领域", "④撰写": "④撰写",
-    "⑤a当年件数": "⑤a", "⑤b一致性": "⑤b", "⑥多件相似": "⑥相似", "违法公德": "违法",
-    # v2
-    "研发能力": "研发", "发明人件数": "件数", "跨机构": "跨机构",
+SHORT_LABEL = {
+    "①类型": "①类型", "①科技属性": "①科技属性", "①社保": "社保", "①主营匹配": "①主营",
+    "有无授权发明专利": "授权发明专利", "发明人件数": "发明人件数", "跨机构": "跨机构",
+    "②代理量": "②代理量", "③技术领域": "③技术领域", "④撰写": "④撰写",
+    "⑥多件相似": "⑥多件相似", "违法公德": "违法公德",
+    "⑤a当年件数": "⑤a", "⑤b一致性": "⑤b",
 }
-SHORT = {  # 逐案表里的单字标记
-    "pass": "过", "fail": "挂", "pending": "待", "na": "—", "waived": "豁",
-}
-LONG = {"pass": "过", "fail": "不过", "pending": "待核查", "na": "不适用", "waived": "豁免"}
 CONCL = ("非正常", "正常", "待核查")
 
 FONT_CANDIDATES = [
@@ -65,16 +61,7 @@ FONT_CANDIDATES = [
 
 
 def label(c):
-    """公开号优先；docx 等无著录项时退回专利名称。"""
     return c.get("pub") or c.get("title") or "—"
-
-
-def pick_dims(cases) -> list[str]:
-    """案件里出现 v2 维度就用 DIMS_V2，否则用 v1 的 DIMS。"""
-    keys = set()
-    for c in cases:
-        keys.update((c.get("dims") or {}).keys())
-    return DIMS_V2 if "研发能力" in keys else DIMS
 
 
 def load_cases(cases_dir):
@@ -92,263 +79,128 @@ def load_cases(cases_dir):
         rec.setdefault("dims", {})
         rec.setdefault("notes", {})
         rec.setdefault("conclusion", "待核查")
+        for old, new in DIM_ALIAS.items():
+            if old in rec["dims"] and new not in rec["dims"]:
+                rec["dims"][new] = rec["dims"].pop(old)
+            if old in rec["notes"] and new not in rec["notes"]:
+                rec["notes"][new] = rec["notes"].pop(old)
         cases.append(rec)
     return cases, batch
 
 
-def compute(cases, dims=None):
-    dims = dims or DIMS
+def pick_dims(cases):
+    keys = set()
+    for c in cases:
+        keys.update((c.get("dims") or {}).keys())
+    return DIMS_V2 if ("有无授权发明专利" in keys or "发明人件数" in keys) else DIMS
+
+
+def compute(cases, dims):
     stat = {d: Counter() for d in dims}
     for c in cases:
         for d in dims:
             stat[d][c["dims"].get(d, "pending")] += 1
-    concl = Counter(c["conclusion"] for c in cases)
-    combos = Counter()
-    for c in cases:
-        fails = tuple(d for d in dims if c["dims"].get(d) == "fail")
-        if fails:
-            combos[fails] += 1
-    multi = Counter(len(tuple(d for d in dims if c["dims"].get(d) == "fail"))
-                    for c in cases if c["conclusion"] == "非正常")
-    return stat, concl, combos, multi
+    return stat, Counter(c["conclusion"] for c in cases)
 
 
-def fail_pubs(cases, dim):
-    return [label(c) for c in cases if c["dims"].get(dim) == "fail"]
+def _brief_reason(c, dim):
+    """不过原因：优先 fail_reasons，其次 notes 首段，截短。"""
+    txt = (c.get("fail_reasons") or {}).get(dim)
+    if not txt:
+        txt = (c.get("notes") or {}).get(dim) or ""
+        txt = re.split(r"；|→", txt)[0]
+    return txt.strip()[:60] or (SHORT_LABEL.get(dim, dim) + "不过")
 
 
-AGENT_DATE = "取数日未记"
-
-
-def _clip_title(t, n=22):
-    """对比文件标题：去掉末尾括号注释，过长截断。"""
-    t = re.sub(r"（[^）]*）\s*$", "", (t or "").strip())
-    return t[:n]
-
-
-def _v2_extra(c, add):
-    """v2 专属证据块：豁免 / 计数过程 / 跨机构分组。"""
-    w = c.get("waiver")
-    if w:
-        add("- **企业类豁免**：%s（%s 年认定）→ ①类型/①科技/①社保/①主营/研发能力 不参与否决"
-            % (w.get("level", ""), w.get("year", "")))
-    n = c.get("v2_counts")
-    if n:
-        add("- **发明人计数**：名口径 %s 件 → 剔除重名 %s 件 → 有效 %s 件"
-            % (n.get("raw"), n.get("dropped"), n.get("kept")))
-        for x in (n.get("dropped_list") or [])[:6]:
-            add("  - 剔除：%s（%s）" % (x, "见报告明细"))
-    x = c.get("v2_cross_org")
-    if x:
-        add("- **跨机构**：申请人 %d 家 → 聚组 %d 组%s"
-            % (x.get("applicants", 0), x.get("groups", 0),
-               ("；关联： " + "、".join(x.get("edges") or [])) if x.get("edges") else ""))
-    nv = c.get("v2_novelty")
-    if nv and nv.get("skipped"):
-        add("- **③ 归类**：归「%s」，按 rules/50 §3b 不看创新度（未触发创新度）；%s"
-            % (nv.get("category", "非四类"), nv.get("skip_reason") or ""))
-    elif nv:
-        add("- **③ 归类／创新度**：归「%s」；特征 N=%s"
-            % (nv.get("category", "—"), nv.get("N")))
-        refs = nv.get("refs") or []
-        feats = nv.get("features") or []
-        if feats:
-            add("")
-            add("| 特征 | 内容 | " + " | ".join(r["pub"] for r in refs) + " |")
-            add("|---" * (2 + len(refs)) + "|")
-            for f in feats:
-                cells = [f.get("id", ""), f.get("text", "")]
-                for r in refs:
-                    cells.append("✔" if f.get("id") in (r.get("hit") or []) else "✘")
-                add("| " + " | ".join(str(x) for x in cells) + " |")
-            add("")
-        for r in refs:
-            add("  - %s（%s，%s）覆盖 %s/%s＝%.0f%%，差异：%s"
-                % (r["pub"], r.get("pub_date", ""), _clip_title(r.get("title")),
-                   r.get("k"), nv.get("N"), 100.0 * float(r.get("ratio") or 0), r.get("diff", "—")))
-        add("  - 合并覆盖度 %.0f%%；差异定性：%s → **%s**"
-            % (100.0 * float(nv.get("combined") or 0), nv.get("diff", "—"),
-               "创新度不足" if nv.get("verdict") == "fail" else "创新度够"))
-
-
-def build_md(cases, batch, out_base, stat, concl, combos, multi, dims_=None):
-    dims_ = dims_ or DIMS
-    now = time.strftime("%Y-%m-%d %H:%M")
-    n = len(cases)
-    L = []
-    add = L.append
-    title = batch.get("title") or "专利非正常申请批量筛查报告"
-    add("# %s\n" % title)
-    add("- 生成时间：%s" % now)
-    add("- 案件数：%d" % n)
-    add("- 判定口径：全维（%d 项）且门；任一维不过 = 非正常；缺数据 = 待核查；企业类豁免不否决" % len(dims_))
-    if batch.get("rules_version"):
-        add("- 阈值快照：%s" % batch["rules_version"])
-    if batch.get("note"):
-        add("- 批次说明：%s" % batch["note"])
-    add("")
-
-    add("## 一、结论概览\n")
-    add("| 结论 | 件数 | 占比 |")
-    add("|---|---:|---:|")
-    for k in CONCL:
-        add("| %s | %d | %.1f%% |" % (k, concl[k], 100.0 * concl[k] / n if n else 0))
-    add("| **合计** | **%d** | 100%% |" % n)
-    add("")
-
-    add("## 二、各维度命中统计\n")
-    add("> 一个案子可能同时挂多项，所以「不过」列的合计会大于非正常件数。")
-    add("")
-    add("| 维度 | 不过 | 待核查 | 豁免 | 不适用 | 通过 | 不过率 |")
-    add("|---|---:|---:|---:|---:|---:|---:|")
-    for d in dims_:
-        s = stat[d]
-        add("| %s | %d | %d | %d | %d | %d | %.1f%% |"
-            % (d, s["fail"], s["pending"], s["waived"], s["na"], s["pass"],
-               100.0 * s["fail"] / n if n else 0))
-    add("")
-
-    agents = {}
-    for c in cases:
-        ag = c.get("agent") or ""
-        if not ag:
-            continue
-        e = agents.setdefault(ag, {"pubs": [], "state": c["dims"].get("②代理量"),
-                                   "note": (c.get("notes") or {}).get("②代理量", "")})
-        e["pubs"].append(label(c))
-    if agents:
-        add("### ②代理量明细（香橼树 · 本所口径 · 滚动 12 个月，取数日 %s）\n" % AGENT_DATE)
-        add("| 代理师 | 滚动 12 个月 | 案子数 | 判定 | 公开号 |")
-        add("|---|---:|---:|---|---|")
-        for ag, e in sorted(agents.items(), key=lambda kv: -len(kv[1]["pubs"])):
-            m = re.search(r"代理量\s*(\d+)\s*件", e["note"])
-            val = ("%s 件" % m.group(1)) if m else "未核"
-            add("| %s | %s | %d | %s | %s |" % (ag, val, len(e["pubs"]),
-                                               SHORT.get(e["state"], "?"), "、".join(e["pubs"])))
-        add("")
-
-    add("## 三、命中项组合\n")
-    if combos:
-        add("| 命中组合 | 件数 | 公开号 |")
-        add("|---|---:|---|")
-        for combo, cnt in combos.most_common():
-            pubs = [label(c) for c in cases
-                    if tuple(d for d in dims_ if c["dims"].get(d) == "fail") == combo]
-            add("| %s | %d | %s |" % ("＋".join(combo), cnt, "、".join(pubs)))
+def _case_line(c, dims):
+    concl = c["conclusion"]
+    if concl == "非正常":
+        fails = [d for d in dims if c["dims"].get(d) == "fail"]
+        reasons = "；".join("%s %s" % (SHORT_LABEL.get(d, d), _brief_reason(c, d)) for d in fails)
+        line = "**不过**：%s" % reasons
+    elif concl == "正常":
+        line = "**过**"
     else:
-        add("无命中项。")
-    add("")
-    add("非正常案的命中项数分布：%s\n"
-        % "，".join("%d 项 %d 件" % (k, v) for k, v in sorted(multi.items())))
-
-    add("## 四、逐案总表\n")
-    head = ["#", "公开号/名称", "申请人", "结论"] + [HEAD_SHORT.get(d, d) for d in dims_] + ["命中项"]
-    add("| " + " | ".join(head) + " |")
-    add("|" + "---|" * len(head))
-    for i, c in enumerate(cases, 1):
-        hit = "＋".join(HEAD_SHORT.get(d, d) for d in dims_ if c["dims"].get(d) == "fail") or "—"
-        cells = [str(i), label(c), (c.get("applicants") or [""])[0][:22]]
-        cells.append(c["conclusion"])
-        cells += [SHORT.get(c["dims"].get(d, "pending"), "?") for d in dims_]
-        cells.append(hit)
-        add("| " + " | ".join(cells) + " |")
-    add("")
-
-    add("## 五、复核清单\n")
-    rev = [c for c in cases if c.get("review")]
-    if rev:
-        group = {}
-        for c in rev:
-            group.setdefault(c["review"], []).append(label(c))
-        for txt, labels in group.items():
-            if len(labels) == 1:
-                add("- **%s**：%s" % (labels[0], txt))
-            else:
-                add("- **%d 件**：%s（%s%s）"
-                    % (len(labels), txt, "、".join(labels[:3]),
-                       " 等" if len(labels) > 3 else ""))
-    else:
-        add("无。")
-    add("")
-
-    pend = [c for c in cases if c["conclusion"] == "待核查"]
+        miss = [SHORT_LABEL.get(d, d) for d in dims if c["dims"].get(d) == "pending"]
+        line = "**待核查**：缺 %s" % ("、".join(miss) if miss else "数据")
+    pend = [SHORT_LABEL.get(d, d) for d in dims
+            if c["dims"].get(d) == "pending" and concl != "待核查"]
     if pend:
-        add("### 待核查案件缺什么\n")
-        for c in pend:
-            miss = [d for d in dims_ if c["dims"].get(d) == "pending"]
-            add("- %s：%s" % (label(c), "、".join(miss) or "未注明"))
-        add("")
+        line += "（待核查项：%s）" % "、".join(pend)
+    return line
 
-    b5 = [c for c in cases if c["dims"].get("⑤b一致性") == "fail"]
-    if b5:
-        add("### ⑤b 降级参考（同名碰撞/母子公司分流）\n")
-        add("> ⑤b 用「第一发明人（inventors[0]）名下记录」的申请人比对本案。若下表异申请人实为同名他人，"
-            "该案⑤b可降级，「若无⑤b」列即为降级后结论。\n")
-        add("| 公开号 | ⑤b 异申请人（样本） | 若无⑤b | 其余挂项 |")
-        add("|---|---|---|---|")
-        for c in b5:
-            fl = c.get("⑤b_foreign") or []
-            other = "＋".join(HEAD_SHORT[d] for d in (c.get("still_fail") or [])) or "—"
-            add("| %s | %s | %s | %s |" % (c.get("pub", ""),
-                                          "、".join(fl[:3]) + ("…" if len(fl) > 3 else "") if fl else "—",
-                                          c.get("downgrade_if_5b_collision", "—"), other))
-        add("")
 
-    add("## 六、逐案证据\n")
-    add("> 判据锚点：权项号、说明书段号、外部数据来源与取数日。（本报告逐维列出证据）\n")
-    for c in cases:
-        add("**%s**｜%s\n" % (label(c), c.get("title", "")))
-        add("申请人：%s｜第一发明人：%s｜申请日：%s｜结论：**%s**\n"
-            % ("、".join(c.get("applicants") or []), c.get("first_inventor", ""),
-               c.get("app_date", ""), c["conclusion"]))
-        verbose = bool(batch.get("verbose_evidence"))
-        for d in dims_:
-            st = c["dims"].get(d)
-            note = (c.get("notes") or {}).get(d, "—")
-            if verbose:
-                add("- %s %s：%s" % (d, LONG.get(st, "?"), note))
-            elif d in ("②代理量", "⑤a当年件数") and st in ("pass", "fail", "pending"):
-                add("- %s %s：%s" % (d, LONG.get(st, "?"), note))
-            elif st in ("fail", "pending"):
-                add("- %s %s：%s" % (d, "不过" if st == "fail" else "待核查", note))
-        _v2_extra(c, add)
-        add("")
+def build_md(cases, batch, out_base, dims, stat, concl):
+    n = len(cases)
+    now = time.strftime("%Y-%m-%d %H:%M")
+    L = []
+    L.append("# %s\n" % (batch.get("title") or "专利非正常申请批量筛查报告"))
+    L.append("- 生成时间：%s" % now)
+    L.append("- 案件数：%d" % n)
+    L.append("- 判定口径：任一维不过 = 非正常；缺数据 = 待核查\n")
 
-    if batch.get("sources"):
-        add("## 七、数据来源与取数日\n")
-        add("| 数据源 | 取数日 | 说明 |")
-        add("|---|---|---|")
-        for name, info in batch["sources"].items():
-            if isinstance(info, dict):
-                add("| %s | %s | %s |" % (name, info.get("date", ""), info.get("note", "")))
-            else:
-                add("| %s | %s |  |" % (name, info))
-        add("")
-    if batch.get("cost"):
-        add("## 八、取数成本\n")
-        add("```\n%s\n```\n" % json.dumps(batch["cost"], ensure_ascii=False, indent=1))
+    L.append("## 总览\n")
+    L.append("- 不过 **%d** 件，过 **%d** 件，待核查 **%d** 件。"
+             % (concl["非正常"], concl["正常"], concl["待核查"]))
+    fails = [(SHORT_LABEL.get(d, d), stat[d]["fail"]) for d in dims if stat[d]["fail"]]
+    if fails:
+        L.append("- 不过项分布：%s。" % "；".join("%s %d 件" % (k, v) for k, v in fails))
+    pend = [(SHORT_LABEL.get(d, d), stat[d]["pending"]) for d in dims if stat[d]["pending"]]
+    if pend:
+        L.append("- 待核查项：%s。" % "；".join("%s %d 件" % (k, v) for k, v in pend))
+    if batch.get("note"):
+        L.append("\n> %s" % batch["note"])
+    L.append("")
+
+    L.append("## 逐件结论\n")
+    for i, c in enumerate(cases, 1):
+        app = (c.get("applicants") or [""])[0]
+        L.append("%d. **%s**（%s）—— %s" % (i, label(c), app, _case_line(c, dims)))
+    L.append("")
+
+    srcs = batch.get("sources") or {}
+    revs = [c for c in cases if c.get("review")]
+    if srcs or revs or batch.get("cost"):
+        L.append("## 附注\n")
+        if srcs:
+            L.append("**数据来源与取数日**\n")
+            for k, v in srcs.items():
+                L.append("- %s %s：%s" % (k, v.get("date", ""), v.get("note", "")))
+            L.append("")
+        if revs:
+            L.append("**复核项**\n")
+            group = {}
+            for c in revs:
+                group.setdefault(c["review"].strip(), []).append(label(c))
+            for txt, labels in group.items():
+                if len(labels) == 1:
+                    L.append("- %s：%s" % (labels[0], txt))
+                else:
+                    L.append("- %d 件：%s（%s%s）"
+                             % (len(labels), txt, "、".join(labels[:3]),
+                                " 等" if len(labels) > 3 else ""))
+            L.append("")
+        if batch.get("cost"):
+            L.append("**取数成本**：%s\n" % json.dumps(batch["cost"], ensure_ascii=False))
 
     with open(out_base + ".md", "w", encoding="utf-8") as f:
         f.write("\n".join(L) + "\n")
-    return "\n".join(L)
 
 
 def _pick_font():
     for p in FONT_CANDIDATES:
         if p and os.path.exists(p) and not p.lower().endswith(".ttc"):
             return p
-    for p in FONT_CANDIDATES:  # ttc 最后试
+    for p in FONT_CANDIDATES:
         if p and os.path.exists(p):
             return p
     return None
 
 
-def build_pdf(cases, batch, out_base, stat, concl, combos, multi, dims_=None):
-    dims_ = dims_ or DIMS
+def build_pdf(cases, batch, out_base, dims, stat, concl):
     try:
         from fpdf import FPDF
         from fpdf.enums import XPos, YPos
-        from fpdf.fonts import FontFace
     except ImportError:
         return False, "未安装 fpdf2（pip install fpdf2）"
 
@@ -357,209 +209,64 @@ def build_pdf(cases, batch, out_base, stat, concl, combos, multi, dims_=None):
         return False, "找不到可嵌入的中文字体；设 PATENT_REPORT_FONT 指向一个 .ttf"
 
     pdf = FPDF(orientation="P", unit="mm", format="A4")
-    pdf.set_margins(10, 12, 10)
+    pdf.set_margins(12, 14, 12)
     pdf.set_auto_page_break(auto=True, margin=14)
     try:
         pdf.add_font("CJK", "", font)
     except Exception as e:  # noqa: BLE001
         return False, "字体加载失败 %s: %s" % (font, e)
-    pdf.set_font("CJK", "", 10)
-    n = len(cases)
-    now = time.strftime("%Y-%m-%d %H:%M")
 
     def h(txt, size=13):
-        pdf.ln(2)
+        pdf.ln(3)
         pdf.set_font("CJK", "", size)
-        pdf.multi_cell(0, size * 0.62, txt, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.set_font("CJK", "", 10)
+        pdf.multi_cell(0, size * 0.7, txt, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
-    def p(txt):
-        pdf.set_font("CJK", "", 9.5)
-        pdf.multi_cell(0, 5.2, txt, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.set_font("CJK", "", 10)
-
-    def table(cols, rows, widths=None, size=9):
+    def p(txt, size=9.5):
         pdf.set_font("CJK", "", size)
-        # 只嵌了常规字重，表头样式必须显式去掉加粗，否则 fpdf2 会要求 B 字体
-        face = FontFace(emphasis="", color=(20, 20, 20), fill_color=(236, 236, 236))
-        with pdf.table(col_widths=widths, line_height=size * 0.62,
-                       headings_style=face, first_row_as_headings=True) as t:
-            r = t.row()
-            for c in cols:
-                r.cell(str(c))
-            for row in rows:
-                r = t.row()
-                for c in row:
-                    r.cell(str(c))
-        pdf.set_font("CJK", "", 10)
+        pdf.multi_cell(0, 5.6, txt, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     pdf.add_page()
     pdf.set_font("CJK", "", 17)
-    pdf.multi_cell(0, 9, batch.get("title") or "专利非正常申请批量筛查报告",
+    pdf.multi_cell(0, 10, batch.get("title") or "专利非正常申请批量筛查报告",
                    new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.ln(1)
-    p("生成时间 %s｜案件数 %d｜口径：%d 项全维且门，任一维不过＝非正常，缺数据＝待核查"
-      % (now, n, len(dims_)))
-    if batch.get("rules_version"):
-        p("阈值快照：%s" % batch["rules_version"])
-    if batch.get("note"):
-        pdf.multi_cell(0, 5.2, "批次说明：%s" % batch["note"], new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    p("生成时间 %s｜案件数 %d｜判定口径：任一维不过 = 非正常，缺数据 = 待核查"
+      % (time.strftime("%Y-%m-%d %H:%M"), len(cases)))
 
-    h("一、结论概览")
-    table(["结论", "件数", "占比"],
-          [[k, concl[k], "%.1f%%" % (100.0 * concl[k] / n if n else 0)] for k in CONCL]
-          + [["合计", n, "100%"]], widths=(40, 30, 30))
-
-    h("二、各维度命中统计")
-    p("一个案子可能同时挂多项，「不过」列合计会大于非正常件数。")
-    table(["维度", "不过", "待核查", "不适用", "通过", "不过率"],
-          [[d, stat[d]["fail"], stat[d]["pending"], stat[d]["na"], stat[d]["pass"],
-            "%.1f%%" % (100.0 * stat[d]["fail"] / n if n else 0)] for d in dims_],
-          widths=(46, 20, 24, 24, 22, 24))
-
-    agents = {}
-    for c in cases:
-        ag = c.get("agent") or ""
-        if not ag:
-            continue
-        e = agents.setdefault(ag, {"pubs": [], "state": c["dims"].get("②代理量"),
-                                   "note": (c.get("notes") or {}).get("②代理量", "")})
-        e["pubs"].append(label(c))
-    if agents:
-        h("②代理量明细（香橼树 · 本所口径 · 滚动 12 个月，取数日 %s）" % AGENT_DATE)
-        rows = []
-        for ag, e in sorted(agents.items(), key=lambda kv: -len(kv[1]["pubs"])):
-            m = re.search(r"代理量\s*(\d+)\s*件", e["note"])
-            rows.append([ag, ("%s 件" % m.group(1)) if m else "未核", len(e["pubs"]),
-                         SHORT.get(e["state"], "?"), "、".join(e["pubs"])])
-        table(["代理师", "滚动 12 个月", "案子数", "判定", "公开号"], rows,
-              widths=(26, 26, 18, 16, 120), size=8)
-
-    h("三、命中项组合")
-    if combos:
-        table(["命中组合", "件数", "公开号"],
-              [[" + ".join(c), k, "、".join(label(cc) for cc in cases
-                                            if tuple(d for d in dims_
-                                                     if cc["dims"].get(d) == "fail") == c)]
-               for c, k in combos.most_common()], widths=(58, 16, 100), size=8)
-    else:
-        p("无命中项。")
-    p("非正常案的命中项数分布：" + "，".join("%d 项 %d 件" % (k, v)
-                                             for k, v in sorted(multi.items())))
-
-    pdf.add_page(orientation="L")   # 先换页再写标题，避免标题孤零零挂在上一页底部
-    h("四、逐案总表")
-    head = ["#", "公开号/名称", "申请人", "结论"] + [HEAD_SHORT.get(d, d) for d in dims_] + ["命中项"]
-    rows = []
-    for i, c in enumerate(cases, 1):
-        hit = "+".join(HEAD_SHORT.get(d, d) for d in dims_ if c["dims"].get(d) == "fail") or "-"
-        rows.append([i, label(c), (c.get("applicants") or [""])[0][:16],
-                     c["conclusion"]]
-                    + [SHORT.get(c["dims"].get(d, "pending"), "?") for d in dims_]
-                    + [hit])
-    # 12.2 * len(dims_) + 固定列；横排可用约 277mm
-    widths = [7, 27, 30, 13] + [12.2] * len(dims_) + [45]
-    table(head, rows, widths=widths, size=6.8)
-
-    pdf.add_page(orientation="P")
-    h("五、复核清单")
-    rev = [c for c in cases if c.get("review")]
-    if rev:
-        group = {}
-        for c in rev:
-            group.setdefault(c["review"], []).append(label(c))
-        for txt, labels in group.items():
-            if len(labels) == 1:
-                p("· %s：%s" % (labels[0], txt))
-            else:
-                p("· %d 件：%s（%s%s）"
-                  % (len(labels), txt, "、".join(labels[:3]), " 等" if len(labels) > 3 else ""))
-    else:
-        p("无。")
-
-    pend = [c for c in cases if c["conclusion"] == "待核查"]
+    h("总览")
+    p("不过 %d 件，过 %d 件，待核查 %d 件。"
+      % (concl["非正常"], concl["正常"], concl["待核查"]))
+    fails = [(SHORT_LABEL.get(d, d), stat[d]["fail"]) for d in dims if stat[d]["fail"]]
+    if fails:
+        p("不过项分布：" + "；".join("%s %d 件" % (k, v) for k, v in fails) + "。")
+    pend = [(SHORT_LABEL.get(d, d), stat[d]["pending"]) for d in dims if stat[d]["pending"]]
     if pend:
-        h("六、待核查案件缺什么")
-        for c in pend:
-            miss = [d for d in dims_ if c["dims"].get(d) == "pending"]
-            p("· %s：%s" % (label(c), "、".join(miss) or "未注明"))
+        p("待核查项：" + "；".join("%s %d 件" % (k, v) for k, v in pend) + "。")
 
-    b5 = [c for c in cases if c["dims"].get("⑤b一致性") == "fail"]
-    if b5:
-        h("五（续）、⑤b 降级参考（同名碰撞/母子公司分流）")
-        p("⑤b 比对「第一发明人（inventors[0]）名下记录」的申请人。异申请人若实为同名他人，该案⑤b 可降级。")
-        rows = []
-        for c in b5:
-            fl = c.get("⑤b_foreign") or []
-            other = "+".join(HEAD_SHORT[d] for d in (c.get("still_fail") or [])) or "-"
-            rows.append([label(c),
-                         "、".join(fl[:2]) + ("…" if len(fl) > 2 else "") if fl else "-",
-                         c.get("downgrade_if_5b_collision", "-"), other])
-        table(["公开号", "⑤b 异申请人（样本）", "若无⑤b", "其余挂项"], rows,
-              widths=(30, 118, 26, 36), size=8)
+    h("逐件结论")
+    for i, c in enumerate(cases, 1):
+        app = (c.get("applicants") or [""])[0]
+        p("%d. %s（%s）—— %s" % (i, label(c), app, _case_line(c, dims).replace("**", "")))
 
-    pdf.add_page(orientation="P")
-    h("六、逐案证据")
-    p("判据锚点：权项号、说明书段号、外部数据来源与取数日。（本报告逐维列出证据）")
-    for c in cases:
-        pdf.set_font("CJK", "", 10.5)
-        pdf.multi_cell(0, 5.6, "%s｜%s" % (label(c), c.get("title", "")),
-                       new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        p("申请人：%s｜第一发明人：%s｜申请日：%s｜结论：%s"
-          % ("、".join(c.get("applicants") or []), c.get("first_inventor", ""),
-             c.get("app_date", ""), c["conclusion"]))
-        verbose = bool(batch.get("verbose_evidence"))
-        for d in dims_:
-            st = c["dims"].get(d)
-            note = (c.get("notes") or {}).get(d, "—")
-            if verbose:
-                p("  · %s %s：%s" % (d, LONG.get(st, "?"), note))
-            elif d in ("②代理量", "⑤a当年件数") and st in ("pass", "fail", "pending"):
-                p("  · %s %s：%s" % (d, LONG.get(st, "?"), note))
-            elif st in ("fail", "pending"):
-                p("  %s %s：%s" % (d, "不过" if st == "fail" else "待核查", note))
-        w = c.get("waiver")
-        if w:
-            p("  · 企业类豁免：%s（%s 年认定）" % (w.get("level", ""), w.get("year", "")))
-        n2 = c.get("v2_counts")
-        if n2:
-            p("  · 发明人计数：名口径 %s → 剔除 %s → 有效 %s"
-              % (n2.get("raw"), n2.get("dropped"), n2.get("kept")))
-        x2 = c.get("v2_cross_org")
-        if x2:
-            p("  · 跨机构：申请人 %d 家 → 聚组 %d 组" % (x2.get("applicants", 0), x2.get("groups", 0)))
-        nv = c.get("v2_novelty")
-        if nv and nv.get("skipped"):
-            p("  · ③ 归类：归「%s」，按 rules/50 §3b 不看创新度（未触发创新度）；%s"
-              % (nv.get("category", "非四类"), nv.get("skip_reason") or ""))
-        elif nv:
-            p("  · ③ 归类／创新度：归「%s」；特征 N=%s" % (nv.get("category", "—"), nv.get("N")))
-            for r in (nv.get("refs") or []):
-                p("    - 对比 %s（%s，%s）覆盖 %s/%s＝%.0f%%，差异：%s"
-                  % (r["pub"], r.get("pub_date", ""), _clip_title(r.get("title")),
-                     r.get("k"), nv.get("N"), 100.0 * float(r.get("ratio") or 0), r.get("diff", "—")))
-            for f in (nv.get("features") or []):
-                hit = [r["pub"] for r in (nv.get("refs") or []) if f.get("id") in (r.get("hit") or [])]
-                p("    · %s %s → %s" % (f.get("id"), f.get("text", ""),
-                                        ("公开于 " + "、".join(hit)) if hit else "未公开"))
-            p("    → 合并覆盖度 %.0f%%，差异定性：%s，判定：%s"
-              % (100.0 * float(nv.get("combined") or 0), nv.get("diff", "—"),
-                 "创新度不足" if nv.get("verdict") == "fail" else "创新度够"))
-        pdf.ln(1)
-
-    if batch.get("sources"):
-        h("七、数据来源与取数日")
-        rows = []
-        for name, info in batch["sources"].items():
-            if isinstance(info, dict):
-                rows.append([name, info.get("date", ""), info.get("note", "")])
-            else:
-                rows.append([name, str(info), ""])
-        table(["数据源", "取数日", "说明"], rows, widths=(46, 32, 100), size=8)
-
-    if batch.get("cost"):
-        h("八、取数成本")
-        p(json.dumps(batch["cost"], ensure_ascii=False, indent=1))
+    srcs = batch.get("sources") or {}
+    revs = [c for c in cases if c.get("review")]
+    if srcs or revs:
+        h("附注")
+        if srcs:
+            p("数据来源与取数日：", size=10)
+            for k, v in srcs.items():
+                p("· %s %s：%s" % (k, v.get("date", ""), v.get("note", "")))
+        if revs:
+            p("复核项：", size=10)
+            group = {}
+            for c in revs:
+                group.setdefault(c["review"].strip(), []).append(label(c))
+            for txt, labels in group.items():
+                if len(labels) == 1:
+                    p("· %s：%s" % (labels[0], txt))
+                else:
+                    p("· %d 件：%s（%s%s）" % (len(labels), txt, "、".join(labels[:3]),
+                                              " 等" if len(labels) > 3 else ""))
 
     pdf.output(out_base + ".pdf")
     return True, ""
@@ -573,8 +280,6 @@ def main(argv):
     a = ap.parse_args(argv[1:])
 
     cases, batch = load_cases(a.cases_dir)
-    global AGENT_DATE
-    AGENT_DATE = (batch.get("sources", {}).get("香橼树", {}) or {}).get("date") or time.strftime("%Y-%m-%d")
     if not cases:
         print("没有找到案件 JSON：%s/*.json" % a.cases_dir)
         return 2
@@ -584,16 +289,16 @@ def main(argv):
     out = os.path.abspath(a.out)
     os.makedirs(os.path.dirname(out), exist_ok=True)
 
-    dims_ = pick_dims(cases)
-    stat, concl, combos, multi = compute(cases, dims_)
-    build_md(cases, batch, out, stat, concl, combos, multi, dims_)
+    dims = pick_dims(cases)
+    stat, concl = compute(cases, dims)
+    build_md(cases, batch, out, dims, stat, concl)
     print("md  ->", out + ".md")
-    ok, why = build_pdf(cases, batch, out, stat, concl, combos, multi, dims_)
+    ok, why = build_pdf(cases, batch, out, dims, stat, concl)
     print(("pdf -> " + out + ".pdf") if ok else ("pdf 跳过：" + why))
     print("非正常 %d / 正常 %d / 待核查 %d；不过项合计 %d"
           % (concl["非正常"], concl["正常"], concl["待核查"],
-             sum(stat[d]["fail"] for d in dims_)))
-    return 0 if ok else 0
+             sum(stat[d]["fail"] for d in dims)))
+    return 0
 
 
 if __name__ == "__main__":
