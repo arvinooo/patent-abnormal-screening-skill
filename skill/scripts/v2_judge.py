@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""v2 单案判定：把 rules/ 的逻辑串起来，输出 dims + 结论 + 证据。
+"""单案判定：把 rules/ 的逻辑串起来，输出 dims + 结论 + 证据。
 
-文本维（③④⑥违法）不在本文件算，由调用方传入（v1 判过就直接复用，口径没变）。
+文本维（③④⑥违法）不在本文件算，由调用方传入。
 """
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ def judge(case: dict, text_dims: dict | None = None, verbose: bool = False) -> d
     dims["①主营匹配"] = case.get("main_match") or text_dims.get("①主营匹配") or "pending"
     ev["①社保"] = f"参保 {reg.get('insured')} 人（企查查 {reg.get('_fetched') or ''}）"
 
-    # ---------- 第 5 步：发明人（剔重名 → 计数 → 1.1 兜底）
+    # ---------- 第 4 步：⑤ 发明人件数（剔重名 → 计数）
     anchor = case.get("app_date") or None          # 窗口锚点 = 本案申请日（无则查询日）
     inv = F.inventor_records(case["first_inventor"], anchor)
     dd = R.dedupe(inv.get("records") or [], case)
@@ -49,34 +49,23 @@ def judge(case: dict, text_dims: dict | None = None, verbose: bool = False) -> d
     if dropped:
         ev["被剔除"] = [f"{x['app_no']} {x['title']}（{x['reason']}）" for x in dropped][:8]
 
+    # 件数只判件数，不掺申请人的研发能力
     if inv.get("common_name"):
-        # 件数不可采信，但研发能力照样能判：
-        # 若有授权发明 → 件数未定，只能待核查；若没有 → 无论件数多少都不过
         dims["发明人件数"] = "pending"
-        base = (case.get("app_date") or "").replace("-", "") or dt.date.today().strftime("%Y%m%d")
-        rd = F.granted_inventions(case["applicant"], base)
-        if rd.get("has"):
-            dims["研发能力"] = "pending"
-            ev["研发能力"] = f"常见名（{inv.get('total_raw')} 组）件数不可采信；授权发明 {rd.get('granted_invention')} 件 → 待核查"
-        else:
-            dims["研发能力"] = "fail"
-            ev["研发能力"] = (f"常见名（{inv.get('total_raw')} 组）件数不可采信，但到基准日 {base} 授权发明专利 "
-                              f"{rd.get('granted_invention')} 件 → 无论件数多少都判非正常")
         ev["计数"] = f"常见名（名下 {inv.get('total_raw')} 组），计数不可采信"
-    elif N >= R.T["inventor_min"]:
-        dims["发明人件数"] = "fail"
-        dims["研发能力"] = "na"
     elif pend and N == 0:
         dims["发明人件数"] = "pending"
-        dims["研发能力"] = "pending"
-        ev["研发能力"] = "记录全部待核查（缺 IPC 或申请人不同），未转研发能力判定"
+    elif N >= R.T["inventor_min"]:
+        dims["发明人件数"] = "fail"
     else:
         dims["发明人件数"] = "pass"
-        base = (case.get("app_date") or "").replace("-", "") or dt.date.today().strftime("%Y%m%d")
-        rd = F.granted_inventions(case["applicant"], base)
-        dims["研发能力"] = "pass" if rd.get("has") else ("fail" if rd.get("has") is False else "pending")
-        ev["研发能力"] = (f"到基准日 {base} 授权发明专利 {rd.get('granted_invention')} 件"
-                          f"（基准：{'本案申请日' if case.get('app_date') else '查询日（本案无申请日）'}）")
+
+    # ---------- 1.1 研发能力（申请人维度独立一条，每案都判）
+    base = (case.get("app_date") or "").replace("-", "") or dt.date.today().strftime("%Y%m%d")
+    rd = F.granted_inventions(case["applicant"], base)
+    dims["研发能力"] = "pass" if rd.get("has") else ("fail" if rd.get("has") is False else "pending")
+    ev["研发能力"] = (f"到基准日 {base} 授权发明专利 {rd.get('granted_invention')} 件"
+                      f"（基准：{'本案申请日' if case.get('app_date') else '查询日（本案无申请日）'}）")
 
     # ---------- 第 6 步：2.1 跨机构（复用 kept 集合）
     apps = [case["applicant"]]
