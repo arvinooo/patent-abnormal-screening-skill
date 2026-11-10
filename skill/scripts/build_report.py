@@ -217,8 +217,8 @@ def build_md(cases, batch, out_base, stat, concl, combos, multi, dims_=None):
                                    "note": (c.get("notes") or {}).get("②代理量", "")})
         e["pubs"].append(label(c))
     if agents:
-        add("### ②代理量明细（香橼树，2026-01-01 至取数日 %s）\n" % AGENT_DATE)
-        add("| 代理师 | 当年代理量 | 案子数 | 判定 | 公开号 |")
+        add("### ②代理量明细（香橼树 · 本所口径 · 滚动 12 个月，取数日 %s）\n" % AGENT_DATE)
+        add("| 代理师 | 滚动 12 个月 | 案子数 | 判定 | 公开号 |")
         add("|---|---:|---:|---|---|")
         for ag, e in sorted(agents.items(), key=lambda kv: -len(kv[1]["pubs"])):
             m = re.search(r"代理量\s*(\d+)\s*件", e["note"])
@@ -257,8 +257,16 @@ def build_md(cases, batch, out_base, stat, concl, combos, multi, dims_=None):
     add("## 五、复核清单\n")
     rev = [c for c in cases if c.get("review")]
     if rev:
+        group = {}
         for c in rev:
-            add("- **%s**（%s）：%s" % (label(c), c["conclusion"], c["review"]))
+            group.setdefault(c["review"], []).append(label(c))
+        for txt, labels in group.items():
+            if len(labels) == 1:
+                add("- **%s**：%s" % (labels[0], txt))
+            else:
+                add("- **%d 件**：%s（%s%s）"
+                    % (len(labels), txt, "、".join(labels[:3]),
+                       " 等" if len(labels) > 3 else ""))
     else:
         add("无。")
     add("")
@@ -418,13 +426,13 @@ def build_pdf(cases, batch, out_base, stat, concl, combos, multi, dims_=None):
                                    "note": (c.get("notes") or {}).get("②代理量", "")})
         e["pubs"].append(label(c))
     if agents:
-        h("②代理量明细（香橼树，2026-01-01 至取数日 %s）" % AGENT_DATE)
+        h("②代理量明细（香橼树 · 本所口径 · 滚动 12 个月，取数日 %s）" % AGENT_DATE)
         rows = []
         for ag, e in sorted(agents.items(), key=lambda kv: -len(kv[1]["pubs"])):
             m = re.search(r"代理量\s*(\d+)\s*件", e["note"])
             rows.append([ag, ("%s 件" % m.group(1)) if m else "未核", len(e["pubs"]),
                          SHORT.get(e["state"], "?"), "、".join(e["pubs"])])
-        table(["代理师", "当年代理量", "案子数", "判定", "公开号"], rows,
+        table(["代理师", "滚动 12 个月", "案子数", "判定", "公开号"], rows,
               widths=(26, 26, 18, 16, 120), size=8)
 
     h("三、命中项组合")
@@ -457,8 +465,15 @@ def build_pdf(cases, batch, out_base, stat, concl, combos, multi, dims_=None):
     h("五、复核清单")
     rev = [c for c in cases if c.get("review")]
     if rev:
+        group = {}
         for c in rev:
-            p("· %s（%s）：%s" % (label(c), c["conclusion"], c.get("review") or ""))
+            group.setdefault(c["review"], []).append(label(c))
+        for txt, labels in group.items():
+            if len(labels) == 1:
+                p("· %s：%s" % (labels[0], txt))
+            else:
+                p("· %d 件：%s（%s%s）"
+                  % (len(labels), txt, "、".join(labels[:3]), " 等" if len(labels) > 3 else ""))
     else:
         p("无。")
 
