@@ -86,7 +86,7 @@ def tab(sid: str | None = None) -> str:
         want = open(TAB_FILE).read().strip()
     d = _bsk("tab", "list", "--session", sid, "--json")
     tabs = d.get("tabs") or [] if isinstance(d, dict) else []
-    # 只认本会话自己窗口里的标签页：旧会话留下的标签页仍可见，但 sync/evaluate 都会失败
+    # 只认本会话自身窗口内的标签页：其他会话遗留的标签页虽在列表里，sync/evaluate 会失败
     win = _session_window(sid)
     if win is not None:
         tabs = [t for t in tabs if str(t.get("window_id")) == str(win)] or tabs
@@ -117,7 +117,7 @@ def tab(sid: str | None = None) -> str:
 
 
 def _session_window(sid: str):
-    """当前会话的 agent_window_id，用于过滤掉旧会话残留的标签页。"""
+    """当前会话的 agent_window_id，用于把标签页限定在本会话窗口内。"""
     d = _bsk("session", "list", "--json")
     for s in (d if isinstance(d, list) else []):
         if s.get("session_id") == sid:
@@ -516,7 +516,7 @@ def granted_invention(app: str, base_date: str) -> dict:
 def inventor_patents(name: str, start: str, end: str) -> dict:
     """发明人滚动窗口下的专利：按申请号去重后的记录 + 申请人。"""
     expr = f"IN=({name}) AND AD=[{start} TO {end}]"
-    # 窗口内条数常超一页：必须翻页取全，否则 records 只有首页 20 行（计数偏松、剔除重名无据）
+    # 窗口内条数超出单页容量，翻页取全：records 不完整时计数与剔重名都不可用
     r = search(expr, all_pages=True)
     rows = r.get("rows") or []
     seen, uniq = set(), []
@@ -585,7 +585,7 @@ def claims_text(pub: str) -> dict:
     """取单件专利的权利要求文本。
 
     incoPat 详情页地址依赖检索上下文（formerQuery），无法用公开号直接拼 URL；
-    这里改为在当前结果页按公开号定位该行，抓「首项权利要求」字段——
+    在当前结果页按公开号定位该行，抓「首项权利要求」字段——
     该字段需先在结果页「显示字段」勾选（账号会记住），未勾选时返回空。
     """
     sid = session()

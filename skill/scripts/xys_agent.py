@@ -36,7 +36,7 @@ XYS = "https://main.xysip.com/#/pt/orgData/agentYearStatistics"
 XYS_HOST = "xysip.com"
 
 # 年份字段是 el-date-editor 的「年」选择器，不是普通 select；
-# 页面上第一个 .el-select 是每页条数，别用它改年份。
+# 页面上第一个 .el-select 是每页条数；年份字段用年选择器（el-date-editor）设值。
 _QUERY = """(async()=>{
  const Y=%d, NAME=%s;
  const sleep=ms=>new Promise(r=>setTimeout(r,ms));

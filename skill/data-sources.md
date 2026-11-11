@@ -98,10 +98,10 @@ python3 scripts/xys_agent.py 张亮 --anchor 2025-01-16 --no-cache
 输出：`value`（窗口求和）、`window`、`months`（逐月总量）、`missing_months`、`years`.
 页面查不到该行 → `status=not_found`，按待核查处理。
 
-脚本已封装页面两个坑：年份字段是 `el-date-editor` 的年选择器（不是 `el-select`；
-页面上第一个 `.el-select` 是每页条数）、首屏只渲染框架（自动刷新一次再等 `form`）。
+脚本按页面实际结构取数：年份字段是 `el-date-editor` 的年选择器（不是 `el-select`，
+页面上第一个 `.el-select` 是每页条数）；首屏只渲染框架，脚本自动刷新一次再等 `form` 出现。
 缓存分两层：`xys_month`（`姓名|年`，30 天，整年分月表）与 `agent_month`（`姓名|锚点`，1 天，窗口求和）。
-同一代理师不同锚点复用同一张分月表，不再重查。
+同一代理师的不同锚点复用同一张分月表。
 
 ### 2.2 手工路径
 
@@ -169,7 +169,7 @@ python3 scripts/inco_inventor.py --names "金锐博,王键,张钦崇" --out cach
 3. 按申请号去重（一案双申只算 1 件）；
 4. 对本案其余发明人各跑一次同窗口 `IN=(...)`，按申请号求交集，标 `co_inventors`（剔重名用）。
 
-结果页会把每页调到 100 并翻页取全（`inco_client.inventor_patents` 的 `all_pages=True`）：窗口内 131 条约 75 秒取完。只读首页 20 行时 `records` 不全，计数与剔重名都不可用。
+结果页每页调到 100 并翻页取全（`inco_client.inventor_patents` 的 `all_pages=True`）：窗口内 131 条约 75 秒取完。`records` 须覆盖全部结果行，否则计数与剔重名都不可用。
 
 | 判据 | 检索式 | 取数方式 |
 |---|---|---|
