@@ -149,6 +149,14 @@ def granted_inventions(app: str, base_date: str | None = None) -> dict:
 def honor(app: str) -> dict:
     hit = cache_get("company_honor", app, max_age=90)
     if hit:
+        # 缓存可能是旧写法：只有 honors 没有 zhuanjingtexin/_ok，读时补齐
+        if "zhuanjingtexin" not in hit:
+            hit["zhuanjingtexin"] = [
+                {"name": it.get("名称") or "", "level": it.get("级别") or "",
+                 "year": it.get("认证年份") or ""}
+                for it in (hit.get("honors") or []) if "专精特新" in (it.get("名称") or "")]
+        hit.setdefault("_ok", bool(hit.get("honors")))
+        hit.setdefault("applicant", app)
         return hit
     p = subprocess.run(["qcc", "operation", "get_honor_info", app, "--json"],
                        capture_output=True, text=True, timeout=180)
@@ -185,11 +193,16 @@ def waiver_from(honor_rec: dict) -> dict | None:
 
 # ---------------------------------------------------------------- 工商（关联判定用）
 
+def _int(v) -> int:
+    """缓存里存的是企查查原样值（字符串），比较前统一转 int。"""
+    return int(re.sub(r"\D", "", str(v if v is not None else "0")) or 0)
+
+
 def company_reg(app: str) -> dict:
     hit = cache_get("company", app, max_age=90)
     if hit and (hit.get("legal_rep") or hit.get("address")):
         return {"applicant": app, "legal_rep": hit.get("legal_rep") or "",
-                "address": hit.get("address") or "", "insured": hit.get("insured"),
+                "address": hit.get("address") or "", "insured": _int(hit.get("insured")),
                 "scope": hit.get("scope") or "", "industry": hit.get("industry") or "",
                 "_fetched": hit.get("_fetched", "")}
     base = hit or {}
@@ -203,7 +216,7 @@ def company_reg(app: str) -> dict:
     out = {"applicant": app,
            "legal_rep": j.get("法定代表人") or base.get("legal_rep") or "",
            "address": j.get("注册地址") or base.get("address") or "",
-           "insured": int(re.sub(r"\D", "", str(j.get("参保人数") or base.get("insured") or "0")) or 0),
+           "insured": _int(j.get("参保人数") or base.get("insured")),
            "scope": j.get("经营范围") or "",
            "industry": (j.get("国标行业") or {}).get("小类") or (j.get("国标行业") or {}).get("中类") or ""}
     cache_set("company", app, out)

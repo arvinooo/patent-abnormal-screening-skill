@@ -34,9 +34,10 @@ def judge(case: dict, text_dims: dict | None = None, verbose: bool = False) -> d
     reg = F.company_reg(case["applicant"])
     dims["①类型"] = case.get("type_check") or text_dims.get("①类型") or "pending"
     dims["①科技属性"] = case.get("tech_attr") or text_dims.get("①科技属性") or "pending"
-    dims["①社保"] = "fail" if (reg.get("insured") or 0) < R.T["social_fail"] else "pass"
+    insured = F._int(reg.get("insured"))
+    dims["①社保"] = "fail" if insured < R.T["social_fail"] else "pass"
     dims["①主营匹配"] = case.get("main_match") or text_dims.get("①主营匹配") or "pending"
-    ev["①社保"] = f"参保 {reg.get('insured')} 人（企查查 {reg.get('_fetched') or ''}）"
+    ev["①社保"] = f"参保 {insured} 人（企查查 {reg.get('_fetched') or ''}）"
 
     # ---------- 第 4 步：⑤ 发明人件数（剔重名 → 计数）
     anchor = case.get("app_date") or None          # 窗口锚点 = 本案申请日（无则查询日）

@@ -94,7 +94,8 @@ def decide_identity(rec: dict, case: dict) -> tuple[str, str]:
 
     返回 (keep|drop|pending, 理由)
     """
-    rec_inv = [strip_id(x) for x in (rec.get("inventors") or [])]
+    # 记录侧的发明人名单：取数写的是 inventors，跑批落盘/手工缓存常写 co_inventors
+    rec_inv = [strip_id(x) for x in (rec.get("inventors") or rec.get("co_inventors") or [])]
     others = {strip_id(x) for x in (case.get("inventors") or [])} - {strip_id(case.get("first_inventor") or "")}
     overlap = {x for x in rec_inv if x in others}
 
