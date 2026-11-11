@@ -179,6 +179,7 @@ def window_months(anchor: dt.date) -> list[str]:
 
 
 def window_total(name: str, anchor: dt.date, use_cache: bool = True) -> dict:
+    start = anchor - dt.timedelta(days=365)
     months = window_months(anchor)
     years = sorted({int(x[:4]) for x in months})
     tables = {}
@@ -186,7 +187,8 @@ def window_total(name: str, anchor: dt.date, use_cache: bool = True) -> dict:
         r = fetch_year(name, y, use_cache)
         if r.get("status") != "ok":
             return {"agent": name, "status": r.get("status"), "error": r.get("error"),
-                    "window": [months[0], months[-1]], "value": None,
+                    "window": [start.isoformat(), anchor.isoformat()],
+                    "month_range": [months[0], months[-1]], "value": None,
                     "years": tables}
         tables[y] = r
     per = {}
@@ -201,7 +203,8 @@ def window_total(name: str, anchor: dt.date, use_cache: bool = True) -> dict:
             missing.append(ym)
     value = sum(per.values())
     out = {"agent": name, "status": "ok" if not missing else "partial",
-           "window": [months[0], months[-1]], "value": value, "months": per,
+           "window": [start.isoformat(), anchor.isoformat()],
+           "month_range": [months[0], months[-1]], "value": value, "months": per,
            "missing_months": missing,
            "years": {str(y): {"total": t.get("total"), "month_sum": t.get("month_sum"),
                               "_fetched": t.get("_fetched")} for y, t in tables.items()},
