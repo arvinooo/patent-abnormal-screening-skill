@@ -86,8 +86,12 @@ def tab(sid: str | None = None) -> str:
         want = open(TAB_FILE).read().strip()
     d = _bsk("tab", "list", "--session", sid, "--json")
     tabs = d.get("tabs") or [] if isinstance(d, dict) else []
+    # 只认本会话自己窗口里的标签页：旧会话留下的标签页仍可见，但 sync/evaluate 都会失败
+    win = _session_window(sid)
+    if win is not None:
+        tabs = [t for t in tabs if str(t.get("window_id")) == str(win)] or tabs
     for t in tabs:
-        if str(t.get("tab_id")) == want:
+        if str(t.get("tab_id")) == want and (t.get("url") or "").startswith("http"):
             return want
     for t in tabs:
         u = t.get("url") or ""
@@ -101,8 +105,32 @@ def tab(sid: str | None = None) -> str:
         raise IncoError("无法打开标签页：%s" % d)
     os.makedirs(os.path.dirname(TAB_FILE), exist_ok=True)
     open(TAB_FILE, "w").write(tid)
-    time.sleep(8)
+    # 新标签页先落 about:blank，此时 sync/evaluate 会报 frame_unobservable；
+    # 等地址变成 http 再返回，避免后面每一步都白等一轮。
+    for _ in range(10):
+        time.sleep(1.5)
+        u = _tab_url(sid, tid)
+        if u.startswith("http"):
+            break
+    time.sleep(2)
     return tid
+
+
+def _session_window(sid: str):
+    """当前会话的 agent_window_id，用于过滤掉旧会话残留的标签页。"""
+    d = _bsk("session", "list", "--json")
+    for s in (d if isinstance(d, list) else []):
+        if s.get("session_id") == sid:
+            return s.get("agent_window_id")
+    return None
+
+
+def _tab_url(sid: str, tid: str) -> str:
+    d = _bsk("tab", "list", "--session", sid, "--json")
+    for t in (d.get("tabs") or [] if isinstance(d, dict) else []):
+        if str(t.get("tab_id")) == str(tid):
+            return t.get("url") or ""
+    return ""
 
 
 def _sync(sid: str, tid: str) -> tuple[str, str]:
@@ -306,6 +334,26 @@ _READ_RESULT = r"""(function(){
 })()"""
 
 
+# 结果页分页控件：每页条数是 #resultBoxPage .page_left 下的 <a>20/50/100</a>；
+# 下一页是 <a paged="N">下一页</a>，没有 paged 属性即已到末页。
+_SET_PAGE_SIZE = """(()=>{
+  const as=[...document.querySelectorAll('#resultBoxPage .page_left a')];
+  const a=as.find(function(e){return e.textContent.trim()===String(%s);});
+  if(!a) return JSON.stringify({ok:0,err:'no page size link'});
+  a.click();
+  return JSON.stringify({ok:1});
+})()"""
+
+_NEXT_PAGE = """(()=>{
+  const a=[...document.querySelectorAll('#resultBoxPage a')].find(function(e){
+    return e.textContent.trim()==='下一页';});
+  if(!a) return JSON.stringify({next:0,err:'no next link'});
+  if(a.getAttribute('paged')===null) return JSON.stringify({next:0});
+  a.click();
+  return JSON.stringify({next:1});
+})()"""
+
+
 def _read_result(expr: str, sid: str, tid: str) -> dict:
     return js(_READ_RESULT % json.dumps(expr, ensure_ascii=False), sid, tid)
 
@@ -454,7 +502,8 @@ def granted_invention(app: str, base_date: str) -> dict:
 def inventor_patents(name: str, start: str, end: str) -> dict:
     """发明人滚动窗口下的专利：按申请号去重后的记录 + 申请人。"""
     expr = f"IN=({name}) AND AD=[{start} TO {end}]"
-    r = search(expr)
+    # 窗口内条数常超一页：必须翻页取全，否则 records 只有首页 20 行（计数偏松、剔除重名无据）
+    r = search(expr, all_pages=True)
     rows = r.get("rows") or []
     seen, uniq = set(), []
     for x in rows:

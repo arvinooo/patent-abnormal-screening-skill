@@ -33,6 +33,8 @@ description: Use when the user supplies Chinese patent application text (PDF 公
 ```text
 第 -1 步 查缓存（铁律 0，必做）：./cache 各命名空间 + results/ 同批结果 + skill 包内 cache
          命中 → 直接用，报告标「缓存值（原始取数日）」；只补缺失/过期的维，别重查
+         同一公开号在 results/*/cases/ 已有案件文件 → 直接读该文件，按各维数据源有效期
+         （company 90 天 / inventor 7 天 / agent_month 1 天）逐项判断，只重跑过期维
 第 0 步  读案：申请人 / 第一发明人（(72) 第一位）/ 其余发明人 / 代理机构 / 代理人
 第 1 步  前置资质：查申请人是否专精特新小巨人或省级专精特新
          ├ 命中 → 企业类维度标 waived（rules/80-exemptions.md）

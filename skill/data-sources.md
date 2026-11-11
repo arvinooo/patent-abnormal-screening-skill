@@ -84,7 +84,26 @@ python3 scripts/cache.py set company "<申请人全名>" --json '{
 4. **收尾必关**：`bsk session stop <id>` 收**位置参数**；写成 `bsk session stop --session <id>` 返回 `cli_parse_error`，窗口根本关不掉。成功、报错、中断三条路都要关，批末兜底 `bsk session stop --all`。
 5. `scripts/inco_inventor.py` 默认复用已有会话、只关自己开的那个；不要加 `--new-session`。
 
-需求：某代理师**当年 1月1日至今的累计代理量**（只用当年口径，不取滚动 12 个月、不取历史年份）。
+需求：代理师**滚动 12 个月**的代理量（锚本案申请日，见 `rules/40-agency.md`）。
+
+### 2.1 最快路径：跑脚本
+
+```bash
+# 锚本案申请日；没给 --anchor 就用今天
+python3 scripts/xys_agent.py 张亮 --anchor 2025-01-16
+python3 scripts/xys_agent.py 张亮 --years 2024,2025      # 只取分月表，自己算窗口
+python3 scripts/xys_agent.py 张亮 --anchor 2025-01-16 --no-cache
+```
+
+输出：`value`（窗口求和）、`window`、`months`（逐月总量）、`missing_months`、`years`.
+页面查不到该行 → `status=not_found`，按待核查处理。
+
+脚本已封装页面两个坑：年份字段是 `el-date-editor` 的年选择器（不是 `el-select`；
+页面上第一个 `.el-select` 是每页条数）、首屏只渲染框架（自动刷新一次再等 `form`）。
+缓存分两层：`xys_month`（`姓名|年`，30 天，整年分月表）与 `agent_month`（`姓名|锚点`，1 天，窗口求和）。
+同一代理师不同锚点复用同一张分月表，不再重查。
+
+### 2.2 手工路径
 
 - 入口：`https://main.xysip.com/#/pt/orgData/agentStatistics`，需浏览器已登录；未登录 → `browser_assist request-help` 请人工登录一次（凭据不写文件）
 - 页面只渲染框架没有表格 → **刷新一次**
@@ -128,6 +147,7 @@ python3 scripts/cache.py set agent_month "张亮|2026-11-10" --json '{
 ```
 
 - 键：`姓名|窗口锚点`，锚点取本案申请日（无申请日取查询日）；不同锚点各自一条记录。
+- `xys_month` 存整年分月表（`{"agent","year","months":[...],"total","month_sum"}`），30 天有效；窗口求和由脚本现算，不缓存派生结论之外的中间值。
 - 数据：2025 年两个月取月度页逐月值；2026 年取年度页「年至今合计」。月值未取时在 `note` 注明，按合计计。
 - `cache/agent.json` 为当年累计口径，与滚动 12 个月不一致，脚本不读取。
 
@@ -148,6 +168,8 @@ python3 scripts/inco_inventor.py --names "金锐博,王键,张钦崇" --out cach
 2. 结果页每页调到 100，翻页收集结果行；
 3. 按申请号去重（一案双申只算 1 件）；
 4. 对本案其余发明人各跑一次同窗口 `IN=(...)`，按申请号求交集，标 `co_inventors`（剔重名用）。
+
+结果页会把每页调到 100 并翻页取全（`inco_client.inventor_patents` 的 `all_pages=True`）：窗口内 131 条约 75 秒取完。只读首页 20 行时 `records` 不全，计数与剔重名都不可用。
 
 | 判据 | 检索式 | 取数方式 |
 |---|---|---|
@@ -366,6 +388,7 @@ qcc operation get_honor_info "<申请人全名>" --json
 | `company_honor` | 申请人全名 | 荣誉列表（名称/级别/年份） | 90 天 |
 | `inventor` | 第一发明人 + 窗口 + 共同发明人集合 | 原始记录（co_inventors/applicants/ipc）+ 检索式 | 7 天 |
 | `inventor_identity` | 发明人 + 本案申请人 | 剔重名结果（保留/剔除 + 理由） | 7 天 |
+| `xys_month` | `姓名\|年` | 香橼树整年分月表：months / total / month_sum | 30 天 |
 | `agent_month` | `姓名\|窗口锚点` | 滚动 12 个月：value / window / months / ytd_2026 / _schema=2 | 1 天 |
 | `prior_art` | 检索式哈希 | 合并去重后的候选对比文件（含公开日/申请日/申请人） | 7 天 |
 | `prior_claims` | 公开号 | 该篇权利要求原文 + 取数日 | 永久 |
