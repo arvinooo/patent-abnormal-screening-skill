@@ -364,6 +364,20 @@ _IPC_RE = re.compile(r"\b[A-H]\d{2}[A-Z]\s?\d+/\d+\b")
 _DATE_RE = re.compile(r"\b(20\d{6}|19\d{6})\b")
 _AP_RE = re.compile(r"[\u4e00-\u9fff（）()·A-Za-z]{2,40}(?:公司|大学|学院|研究院|研究所|中心|厂|局|医院|集团|合作社)")
 _TYPE_RE = re.compile(r"(发明申请|发明授权|实用新型|外观设计)")
+# 申请人列会把权利要求的残句一起带出来（如“冷凝管组包括由筒体的中心”），
+# 这类串会让跨机构维误判成多一家，解析后必须剔掉。
+_AP_JUNK = re.compile(r"包括|设有|位于|其中|所述|以及|用于|的")
+
+
+def _clean_apps(apps: list[str]) -> list[str]:
+    out = []
+    for a in apps:
+        a = a.strip("; ")
+        if not a or len(a) > 30 or _AP_JUNK.search(a):
+            continue
+        if a not in out:
+            out.append(a)
+    return out
 
 
 def parse_row(raw: str) -> dict:
@@ -397,7 +411,7 @@ def parse_row(raw: str) -> dict:
             "pub_date": pub_date,
             "type": types[0] if types else "",
             "title": title,
-            "applicants": [a.rstrip(";") for a in apps][:10],
+            "applicants": _clean_apps(apps)[:10],
             "ipc": ipcs[0] if ipcs else "",
             "dates": dates}
 
