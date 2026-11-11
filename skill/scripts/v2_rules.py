@@ -142,6 +142,32 @@ def dedupe(records: list[dict], case: dict) -> dict:
 # ---------------------------------------------------------------- 2.1 跨机构聚组
 
 
+_ORG_WORDS = re.compile(r"(股份有限公司|有限责任公司|有限公司|公司|集团|控股|厂|研究院|研究所|中心|大学|学院|医院)$")
+_ADMIN_WORDS = re.compile(r"(北京|上海|天津|重庆|中国|香港|澳门|台湾|广东|广州|深圳|湖北|武汉|湖南|长沙|江苏|南京|苏州|浙江|杭州|宁波|山东|济南|青岛|四川|成都|河南|郑州|河北|辽宁|沈阳|大连|安徽|合肥|江西|南昌|山西|太原|陕西|西安|福建|厦门|福州|云南|昆明|贵州|广西|海南|甘肃|青海|宁夏|新疆|西藏|内蒙古|黑龙江|吉林|长春)")
+_IND_WORDS = re.compile(r"(科技|技术|智能|家电|家用电器|移动|软件|电子|信息|网络|数据|自动化|设备|制造|材料|新材料|生物|医药|环保|环境|能源|电气|机械|建设|工程|建筑|设计|贸易|实业|投资|发展|文化|传媒|教育|医疗|健康|服务|管理|咨询|物流|供应链|食品|农业|半导体|通信|光电|机器人|检测)")
+
+
+def brand_word(name: str) -> str:
+    """取字号（品牌/集团商号）：去掉组织形式、行政区划、行业词后剩下的部分。"""
+    s = norm_name(name)
+    s = _ORG_WORDS.sub("", s)
+    s = _ADMIN_WORDS.sub("", s)
+    s = _IND_WORDS.sub("", s)
+    return s
+
+
+def same_brand(a: str, b: str) -> str:
+    """字号相同或互相包含 → 同一集团品牌，返回依据；否则返回空串。"""
+    ba, bb = brand_word(a), brand_word(b)
+    if len(ba) < 2 or len(bb) < 2:
+        return ""
+    if ba == bb:
+        return f"同字号（{ba}）"
+    if ba in bb or bb in ba:
+        return f"同字号（{ba if len(ba) <= len(bb) else bb}）"
+    return ""
+
+
 def relation(a: str, b: str, info: dict) -> str:
     """判两家申请人的关联，返回依据字符串；无关联返回 ''。info: 名称 -> {legal_rep, address}"""
     if norm_name(a) == norm_name(b):
@@ -151,6 +177,9 @@ def relation(a: str, b: str, info: dict) -> str:
         return "名称互相包含"
     if len(na) >= 6 and len(nb) >= 6 and na[:6] == nb[:6]:
         return "≥6 字共同前缀"
+    brand = same_brand(a, b)
+    if brand:
+        return brand
     ia, ib = info.get(a) or {}, info.get(b) or {}
     if ia.get("legal_rep") and ia.get("legal_rep") == ib.get("legal_rep"):
         return f"同法定代表人（{ia['legal_rep']}）"
@@ -159,9 +188,16 @@ def relation(a: str, b: str, info: dict) -> str:
     return ""
 
 
-def group_applicants(apps: list[str], info: dict) -> dict:
-    """并查集聚组，返回 {groups: [[..]], edges: [(a,b,依据)]}"""
-    apps = list(dict.fromkeys(apps))
+def group_applicants(apps: list[str], info: dict, co_sets=None) -> dict:
+    """并查集聚组，返回 {groups: [[..]], edges: [(a,b,依据)]}
+
+    co_sets：同一件申请里同时列名的申请人集合；这些主体属于同一申报组合，先合并。
+    """
+    # 全角/半角括号写法不同但同一主体：按归一化名去重，保留先出现的写法
+    uniq = {}
+    for a in apps:
+        uniq.setdefault(norm_name(a), a)
+    apps = list(uniq.values())
     parent = {a: a for a in apps}
 
     def find(x):
@@ -171,6 +207,13 @@ def group_applicants(apps: list[str], info: dict) -> dict:
         return x
 
     edges = []
+    for seg in (co_sets or []):
+        seg = [x for x in seg if x in parent]
+        for other in seg[1:]:
+            ra, rb = find(seg[0]), find(other)
+            if ra != rb:
+                parent[rb] = ra
+                edges.append((seg[0], other, "同一件申请的共同申请人"))
     for i, a in enumerate(apps):
         for b in apps[i + 1:]:
             why = relation(a, b, info)

@@ -73,7 +73,11 @@ def judge(case: dict, text_dims: dict | None = None, verbose: bool = False) -> d
     apps = [case["applicant"]]
     for x in kept:
         apps.extend(x.get("applicants") or [])
-    apps = list(dict.fromkeys(apps))
+    # 同名不同写法（全角/半角括号）按归一化名合并，保留先出现的写法
+    _uniq = {}
+    for a in apps:
+        _uniq.setdefault(R.norm_name(a), a)
+    apps = list(_uniq.values())
     if inv.get("common_name"):
         dims["跨机构"] = "pending"
         ev["跨机构"] = f"常见名（名下 {inv.get('total_raw')} 组），机构数不可采信 → 待核查"
@@ -84,7 +88,8 @@ def judge(case: dict, text_dims: dict | None = None, verbose: bool = False) -> d
         else:
             rr = F.company_reg(a)
             info[a] = {"legal_rep": rr.get("legal_rep") or "", "address": rr.get("address") or ""}
-    grp = R.group_applicants(apps, info) if len(apps) > 1 else {"groups": [apps] if apps else [], "edges": []}
+    co_sets = [x.get("applicants") or [] for x in kept if len(x.get("applicants") or []) > 1]
+    grp = R.group_applicants(apps, info, co_sets) if len(apps) > 1 else {"groups": [apps] if apps else [], "edges": []}
     if dims.get("跨机构") == "pending":
         pass
     elif len(apps) <= 1:
