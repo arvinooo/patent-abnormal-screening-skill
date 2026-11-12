@@ -109,17 +109,22 @@ def compute(cases, dims):
     return stat, Counter(c["conclusion"] for c in cases)
 
 
-def _brief_reason(c, dim):
+def _brief_reason(c, dim, limit=220):
+    """不过原因：原样取 fail_reasons（已写成"事实+依据"两句），不再按标点截断。
+
+    旧实现只留第一个分句并截到 60 字，长理由会被切在半句上。
+    """
     txt = (c.get("fail_reasons") or {}).get(dim)
     if not txt:
         txt = (c.get("notes") or {}).get(dim) or ""
-        txt = re.split(r"；|→", txt)[0]
-    return txt.strip()[:60] or "不过"
+    txt = re.sub(r"\s+", " ", txt).strip()
+    return (txt[:limit] + "…") if len(txt) > limit else (txt or "不过")
 
 
 def _fails(c, dims):
-    """不过原因：只给一句人话，前面不加维度代号。"""
+    """不过原因：每条一句人话，前面不加维度代号；多条时去掉句末标点后用「；」串起来。"""
     out = [_brief_reason(c, d) for d in dims if c["dims"].get(d) == "fail"]
+    out = [re.sub(r"[。；;\s]+$", "", x) for x in out if x]
     if not out and c["conclusion"] != "正常":
         out = ["关键数据缺失，未取得可放行的证据"]
     return out
@@ -154,7 +159,7 @@ def build_md(cases, batch, out_base, dims, stat, concl):
         L.append("### %d. %s · %s · %s\n" % (i, label(c), app, _verdict(c)))
         fs = _fails(c, dims)
         if fs:
-            L.append("- **不过原因**：%s" % "；".join(fs))
+            L.append("- **不过原因**：%s" % ("；".join(fs) + "。"))
         L.append("")
 
     with open(out_base + ".md", "w", encoding="utf-8") as f:
