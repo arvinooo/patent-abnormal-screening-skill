@@ -24,6 +24,13 @@ T = {
     "novelty_full": 1.00,      # T11 单篇 100% → 不过
     "combo_full": 1.00,        # T12 ≤2 篇合并 100% 且无协同 → 不过
     "algo_ratio": 0.80,        # T08 计算机算法：计算类特征占比 ≥80%
+    # ---- T13 撰写厚度（对应的 rules/00-thresholds.md T13）
+    "thick_fail": 4,           # ≥4 分不过
+    "thick_mid": 3,            # =3 分联判
+    "thick_refs": 8,           # 权1 附图标记 ≥8 计 1 分
+    "thick_paras": 40,         # 说明书段落 <40 计 1 分
+    "thick_ph": 10,            # 「第X」占位 ≥10 计 1 分
+    "thick_nums": 2,           # 具体参数 <2 处计 1 分
 }
 
 # 差异定性（rules/50 §3b 第 3 步）
@@ -256,11 +263,11 @@ def summarize(dims: dict, waiver: dict | None) -> tuple[str, list[str]]:
 
 
 CATEGORY_STATUS = {
-    "生活类": "fail",          # T08 红线
-    "计算机算法": "fail",       # T08 红线
-    "机械装置": "novelty",      # 转 T10–T12
-    "方法步骤图的系统": "novelty",  # 转 T10–T12
-    "非四类": "pass",           # 直接过，不看创新度
+    "生活类": "fail",             # T08 红线
+    "计算机算法": "algo_gate",      # T08 跨域算法：看主体是否匹配
+    "方法步骤图的系统": "algo_gate",  # 同上
+    "机械装置": "novelty",         # 转 T10–T12
+    "非四类": "pass",              # 不触发 T08，仍跑 T13
 }
 
 
@@ -286,17 +293,79 @@ def category_of(flags: dict) -> tuple[str, str]:
     return "非四类", ""
 
 
-def tech_dim(category: str, novelty_result: tuple[str, str] | None = None) -> tuple[str, str]:
-    """③ §3b 分流：非四类直接过；生活类/算法不过；机械装置/方法步骤图看 novelty() 结果。"""
+def is_tech_subject(applicant: str, scope: str = "") -> bool:
+    """主体是否具备科技属性：院校/院所/医院，或名称、经营范围含科技类词。"""
+    blob = (applicant or "") + " " + (scope or "")
+    if re.search(r"大学|学院|学校|研究所|研究院|医院|地震局|研究中心|科学院", blob):
+        return True
+    return bool(re.search(r"科技|技术|信息|智能|软件|网络|数据|电子|通信|自动化|"
+                          r"计算机|数字|物联|检测|技术服务|技术推广", blob))
+
+
+def tech_dim(category: str, novelty_result: tuple[str, str] | None = None,
+             subject_tech: bool = True) -> tuple[str, str]:
+    """③ §3b 分流。
+
+    subject_tech：主体是否具备科技属性（is_tech_subject 的结果）。
+    算法类仅在「主体无科技属性」时判不过（跨域算法）；院校、院所、科技型企业按过。
+    """
     st = CATEGORY_STATUS.get(category, "pass")
     if st == "pass":
-        return "pass", f"归「{category}」，按规则不看创新度"
+        return "pass", f"归「{category}」，不触发 T08"
     if st == "fail":
-        return "fail", f"归「{category}」→ T08 红线，一票不过"
+        return "fail", f"归「{category}」→ T08 红线，不过"
+    if st == "algo_gate":
+        if subject_tech:
+            return "pass", f"归「{category}」，主体具备科技属性，不按跨域算法否决"
+        return "fail", f"归「{category}」→ 跨域算法：主体无科技属性，按 T08 不过"
     if not novelty_result:
         return "pending", f"归「{category}」，需跑 3c 创新度（检索未完成）"
     return novelty_result
 
+
+
+
+_REF = re.compile(r"[（(]\s*\d{1,3}\s*[)）]")
+_EXP = re.compile(r"实验|试验|验证|仿真|测试结果|对比数据|数据表|曲线图")
+_PARA = re.compile(r"\[\d{4}\]")
+_ORD = re.compile(r"第[一二三四五六七八九十]+")
+_NUM = re.compile(r"\d+(?:\.\d+)?\s*(?:%|mm|cm|℃|MPa|kg|倍|r/min|重量份)")
+
+
+def thickness(text: str, claim1: str) -> dict:
+    """T13 撰写厚度分：五项各计 1 分，满分 5 分。
+
+    输入全文与权1 原文。返回 score 与 items（逐项命中说明），由调用方按 rules/00-thresholds.md T13 判。
+    """
+    c1 = claim1 or ""
+    body = text or ""
+    refs = len(_REF.findall(c1))
+    exp = len(_EXP.findall(body))
+    paras = len(_PARA.findall(body))
+    ph = len(_ORD.findall(body))
+    nums = len(_NUM.findall(body))
+    items = {
+        "权1零件清单化": refs >= T["thick_refs"],
+        "无验证数据": exp == 0,
+        "说明书短": paras < T["thick_paras"],
+        "占位式特征": ph >= T["thick_ph"],
+        "无具体参数": nums < T["thick_nums"],
+    }
+    score = sum(1 for v in items.values() if v)
+    return {"score": score, "items": items,
+            "raw": {"refs": refs, "exp": exp, "paras": paras, "ph": ph, "nums": nums}}
+
+
+def thickness_dim(text: str, claim1: str) -> tuple[str, str]:
+    """④ 撰写·T13：≥4 分不过；=3 分不单独否决（返回 pass 并在原因里标注联判）；≤2 分不计。"""
+    r = thickness(text, claim1)
+    hit = [k for k, v in r["items"].items() if v]
+    detail = "、".join(hit) if hit else "无"
+    if r["score"] >= T["thick_fail"]:
+        return "fail", f"撰写厚度 {r['score']}/5（{detail}）"
+    if r["score"] == T["thick_mid"]:
+        return "pass", f"撰写厚度 {r['score']}/5（{detail}），与申请人资质联判"
+    return "pass", f"撰写厚度 {r['score']}/5"
 
 def hard_category(flags: dict) -> tuple[str, str]:
     """兼容旧调用：只回答红线两类是否命中（不再含机械装置/方法步骤图）。"""
