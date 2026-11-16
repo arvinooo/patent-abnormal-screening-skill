@@ -35,6 +35,9 @@ skill/                     ← 就是正在用的那个 skill 目录，可以原
     ├── mindflow_inventor.py  发明人取数（星河智源，浏览器，0 积分）
     └── build_report.py    cases/*.json → report.md + report.pdf
 
+docs/
+└── 非正常判定标准.md      文本层判定标准（面向律师与审核人员，三项判据，不替代 skill 的 11 维取数口径）
+
 reference/
 └── 非正常-规则细化.pdf     判据的原始来源文档
 
@@ -51,6 +54,8 @@ rsync -a skill/ ~/项目路径/.dsh/skills/patent-abnormal-screening/
 ```
 
 （这个 skill 是靠 `SKILL.md` + `rules.md` 驱动的，脚本是辅助工具，缺一不可。）
+
+只在提交前做快速文本判断、或需要给律师一份可读标准时，用 `docs/非正常判定标准.md`。该文档只用申请文件本身和申请批次做判断，不取外部数据，与 skill 的 11 维口径并行。
 
 依赖：Python 3.10+，`python-docx`、`pdfplumber`、`fpdf2`、`pypdf`（可选）；外部工具 `bsk`（浏览器取数）、`qcc`（企查查 CLI）。
 
