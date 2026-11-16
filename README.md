@@ -19,30 +19,30 @@ skill/                     ← 就是正在用的那个 skill 目录，可以原
 ├── SKILL.md               主文件：铁律、判定流程、维度总表、状态映射、报告要求
 ├── rules/                 一维一个文件，按需读
 │   ├── 00-thresholds.md       阈值总表（唯一出口，改阈值只改这里）
-│   ├── 10-applicant.md        ①类型/科技属性/社保/主营 + 1.1 研发能力
-│   ├── 20-inventor.md         1.2 剔重名 + 计数 + ⑤b
-│   ├── 30-cross-org.md        2.1 跨机构聚组
+│   ├── 10-applicant.md        ①类型/科技属性/社保/主营 + 1.1 授权发明专利
+│   ├── 20-inventor.md         剔重名 + 发明人件数
+│   ├── 30-cross-org.md        跨机构聚组
 │   ├── 40-agency.md           ②代理师滚动 12 个月
 │   ├── 50-drafting.md         ③技术领域 + ④撰写
 │   ├── 60-multi-similar.md    ⑥多件相似
 │   ├── 70-illegal.md          违法/公德/公共利益
 │   └── 80-exemptions.md       专精特新豁免 + waived 状态
 ├── data-sources.md        怎么取数：字段码、检索式、缓存、成本
-├── cases.md               标定案例 + v2 回归基线
+├── cases.md               标定案例与回归基线
 └── scripts/
     ├── extract_pdf.py     公开文本 PDF → 著录项/权1/技术领域（带缓存）
-    ├── cache.py           外部数据缓存读写（company/agent/inventor）
-    ├── mindflow_inventor.py  发明人取数（星河智源，浏览器，0 积分）
+    ├── cache.py           外部数据缓存读写（company / agent_month / inventor）
+    ├── inco_login.py      incoPat 登录与凭据
+    ├── inco_client.py     incoPat 浏览器客户端
+    ├── inco_inventor.py   发明人记录检索
+    ├── v2_fetch.py        对比文件与权项检索（布尔 + 语义两路）
+    ├── bsk_helper.py      浏览器操作辅助（v2_fetch 依赖）
+    ├── xys_agent.py       香橼树代理师月度代理量
+    ├── v2_rules.py        规则计算：归类、创新度、T13 撰写厚度
     └── build_report.py    cases/*.json → report.md + report.pdf
 
 docs/
-└── 非正常判定标准.md      文本层判定标准（面向律师与审核人员，三项判据，不替代 skill 的 11 维取数口径）
-
-reference/
-└── 非正常-规则细化.pdf     判据的原始来源文档
-
-tools/
-└── extract_docx.py        额外加的 Word 提取器（不是 skill 本体，输入是 .docx 时用）
+└── 非正常判定标准.md      文本层判定标准（三项判据，面向律师与审核人员；不替代 skill 的 11 维取数口径）
 ```
 
 ## 怎么用
@@ -57,7 +57,7 @@ rsync -a skill/ ~/项目路径/.dsh/skills/patent-abnormal-screening/
 
 只在提交前做快速文本判断、或需要给律师一份可读标准时，用 `docs/非正常判定标准.md`。该文档只用申请文件本身和申请批次做判断，不取外部数据，与 skill 的 11 维口径并行。
 
-依赖：Python 3.10+，`python-docx`、`pdfplumber`、`fpdf2`、`pypdf`（可选）；外部工具 `bsk`（浏览器取数）、`qcc`（企查查 CLI）。
+依赖：Python 3.10+，`pdfplumber`、`fpdf2`、`pypdf`（可选）；外部工具 `bsk`（浏览器取数）、`qcc`（企查查 CLI）。
 
 ## 怎么回滚
 
