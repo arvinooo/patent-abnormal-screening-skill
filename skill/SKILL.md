@@ -5,7 +5,7 @@ description: Use when the user supplies Chinese patent application text (PDF 公
 
 # 专利非正常申请筛查（两层流程）
 
-**第一层只读文件**：手段、效果、批次三项判据，加上违法公德与多件相似。不取外部数据，出"非正常 / 存疑 / 可提交"三档。
+**第一层只读文件**：手段、效果、批次三项判据。不取外部数据，出"非正常 / 存疑 / 可提交"三档。
 **第二层只处理存疑案**：九项主体面板全跑——发明人件数、跨机构、授权发明专利、代理师代理量、分类号集中、主体类型、科技属性、社保人数、主营匹配。任一项成立即非正常，全不成立即可提交。
 
 这样排的依据：文本层在 516 件已确认样本上处理掉 77% 的案子，只有约四分之一需要取数。各判据的实测数据见 `cases.md`。
@@ -21,8 +21,6 @@ description: Use when the user supplies Chinese patent application text (PDF 公
          1a 手段判据（第八条~第十三条）
          1b 效果判据（第十四条~第十七条）
          1c 批次判据（第十八条~第二十条）——件数与申请人数按代理机构代码查该月全部申请，见 rules/30-batch.md
-         1d 违法公德（rules/40-illegal.md）
-         1e 多件相似（批内有多份文本时，rules/50-similar.md）
          输出三档
 第 2 步  主体层（只对"存疑"案，九项全跑，任一成立即非正常）
          2a 第一发明人 12 个月内有效件数（剔重名）≥5
@@ -58,7 +56,7 @@ description: Use when the user supplies Chinese patent application text (PDF 公
 
 | 档 | 含义 | 下一步 |
 |---|---|---|
-| 非正常 | 三项判据命中两项以上，或命中违法公德 | 出结论，附条款；结构类与仅缺数据类加复核提示 |
+| 非正常 | 三项判据命中两项以上 | 出结论，附条款；结构类与仅缺数据类加复核提示 |
 | 存疑 | 命中一项 | 进第二层取数 |
 | 可提交 | 零项 | 放行，报告写「文本层未见异常特征」 |
 
@@ -110,11 +108,9 @@ description: Use when the user supplies Chinese patent application text (PDF 公
 - `rules/10-means.md` — 手段判据细则（第八条~第十三条）
 - `rules/20-effect.md` — 效果判据细则（第十四条~第十七条）
 - `rules/30-batch.md` — 批次判据与取数方法（第十八条~第二十条）
-- `rules/40-illegal.md` — 违法公德
-- `rules/50-similar.md` — 多件相似（拆分型 / 复制型）
-- `rules/60-inventor.md` — 第二层：发明人件数（含剔重名）
-- `rules/70-cross-org.md` — 第二层：跨机构
-- `rules/80-subject.md` — 背景项、专精特新豁免、代理量
+- `rules/40-inventor.md` — 第二层：发明人件数（含剔重名）
+- `rules/50-cross-org.md` — 第二层：跨机构
+- `rules/60-subject.md` — 第二层：主体面板九项、专精特新豁免
 - `data-sources.md` — 取数字段码、检索式、缓存
 - `cases.md` — 标定数据与判例
 - `scripts/text_screen.py` — 第一层脚本；`scripts/extract_pdf.py` — 解析；`scripts/cache.py`、`inco_*.py`、`xys_agent.py` — 第二层取数
