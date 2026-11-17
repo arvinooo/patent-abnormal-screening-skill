@@ -375,6 +375,7 @@ def main() -> int:
         row = {
             "file": c["file"], "pub": c["pub"], "title": c["title"], "applicant": c["applicant"],
             "agency": c["agency"], "app_date": c["app_date"], "util": c["util"],
+            "refs": c["c1_refs"], "exp": c["exp"],
             "means": c["means"], "effect": c["effect"],
             "batch": {"state": "hit", "note": c.get("_batch", "")} if c.get("_batch") else
                      {"state": "miss" if args.batch_from_input else "unevaluated",
