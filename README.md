@@ -2,47 +2,44 @@
 
 一句话：这是「判断一件中国专利申请是不是非正常申请（国知局 77 号令）」这套 skill 的版本库，用来做**版本留档和回滚**。
 
-`v1.0` 是**还没按同事那份《AI 非正常检测标准调整》改的基线版本**——也就是说，如果之后改坏了，回到这个 tag 就是现在能跑通的那一版。
+当前口径是**两层流程**：先只读文件按三项判据出「非正常 / 存疑 / 可提交」，只有存疑案才去查发明人、跨机构等主体数据。
 
 ## 版本与分支
 
 | 分支 / tag | 内容 | 用途 |
 |---|---|---|
-| `main` | 当前口径（v2.1.1：剔重名、跨机构、专精特新豁免、代理 ≥300、③ 先归四类再分流） | 在用的版本 |
-| `tag v1.0` | v1 口径（当年计数、代理 >500、⑤b 硬一致） | 回滚点 |
-| `v2-draft` | v2 口径开发分支（已合入 `main`） | 历史留档 |
+| `main` | 当前口径：两层流程（文本层三项判据 + 存疑案主体层） | 在用的版本 |
+| `tag v1.0` | 最早基线：11 维全量、社保 <3、代理师 >500 | 回滚点 |
 
 ## 目录结构（`main`）
 
 ```
 skill/                     ← 就是正在用的那个 skill 目录，可以原样拷回去
-├── SKILL.md               主文件：铁律、判定流程、维度总表、状态映射、报告要求
-├── rules/                 一维一个文件，按需读
+├── SKILL.md               主文件：两层流程、铁律、三档映射、报告要求
+├── rules/
 │   ├── 00-thresholds.md       阈值总表（唯一出口，改阈值只改这里）
-│   ├── 10-applicant.md        ①类型/科技属性/社保/主营 + 1.1 授权发明专利
-│   ├── 20-inventor.md         剔重名 + 发明人件数
-│   ├── 30-cross-org.md        跨机构聚组
-│   ├── 40-agency.md           ②代理师滚动 12 个月
-│   ├── 50-drafting.md         ③技术领域 + ④撰写
-│   ├── 60-multi-similar.md    ⑥多件相似
-│   ├── 70-illegal.md          违法/公德/公共利益
-│   └── 80-exemptions.md       专精特新豁免 + waived 状态
-├── data-sources.md        怎么取数：字段码、检索式、缓存、成本
-├── cases.md               标定案例与回归基线
+│   ├── 10-means.md            手段判据（第八条~第十三条）
+│   ├── 20-effect.md           效果判据（第十四条~第十七条）+ 机械/实用新型豁免
+│   ├── 30-batch.md            批次判据（第十八条~第二十条）与取数口径
+│   ├── 40-illegal.md          违法 / 公德 / 公共利益
+│   ├── 50-similar.md          多件相似（拆分型 / 复制型）
+│   ├── 60-inventor.md         第二层：发明人件数（含剔重名）
+│   ├── 70-cross-org.md        第二层：跨机构聚组
+│   └── 80-subject.md          背景项（授权发明/主营/社保/代理量）与专精特新豁免
+├── data-sources.md        怎么取数：字段码、检索式、缓存
+├── cases.md               标定数据与判例
 └── scripts/
+    ├── text_screen.py     第一层：三项判据打分，输出三档（不取数）
     ├── extract_pdf.py     公开文本 PDF → 著录项/权1/技术领域（带缓存）
-    ├── cache.py           外部数据缓存读写（company / agent_month / inventor）
+    ├── cache.py           外部数据缓存读写（company / inventor / agent_month）
     ├── inco_login.py      incoPat 登录与凭据
     ├── inco_client.py     incoPat 浏览器客户端
     ├── inco_inventor.py   发明人记录检索
-    ├── v2_fetch.py        对比文件与权项检索（布尔 + 语义两路）
-    ├── bsk_helper.py      浏览器操作辅助（v2_fetch 依赖）
     ├── xys_agent.py       香橼树代理师月度代理量
-    ├── v2_rules.py        规则计算：归类、创新度、T13 撰写厚度
-    └── build_report.py    cases/*.json → report.md + report.pdf
+    └── bsk_helper.py      浏览器操作辅助
 
 docs/
-└── 非正常判定标准.md      文本层判定标准（三项判据，面向律师与审核人员；不替代 skill 的 11 维取数口径）
+└── 非正常判定标准.md      文本层判定标准（八章三十条，面向律师与审核人员）
 ```
 
 ## 怎么用
@@ -53,46 +50,44 @@ docs/
 rsync -a skill/ ~/项目路径/.dsh/skills/patent-abnormal-screening/
 ```
 
-（这个 skill 是靠 `SKILL.md` + `rules.md` 驱动的，脚本是辅助工具，缺一不可。）
+第一层可以直接跑：
 
-只在提交前做快速文本判断、或需要给律师一份可读标准时，用 `docs/非正常判定标准.md`。该文档只用申请文件本身和申请批次做判断，不取外部数据，与 skill 的 11 维口径并行。
+```bash
+python3 scripts/text_screen.py <本批 PDF 目录> --json 结果.json
+python3 scripts/text_screen.py <目录> --batch-from-input   # 送审文件覆盖机构当月全部时
+```
 
-依赖：Python 3.10+，`pdfplumber`、`fpdf2`、`pypdf`（可选）；外部工具 `bsk`（浏览器取数）、`qcc`（企查查 CLI）。
+输出每案一行 JSON：`means` / `effect` / `batch` / `verdict` / `hints`，最后一行为汇总。
+
+需要给律师一份可读标准、或人工复核时，用 `docs/非正常判定标准.md`；它与 `skill/rules/` 的口径一致。
+
+依赖：Python 3.10+，`pypdf`（缺失时回退 `pdfplumber`）；外部取数需 `bsk`（浏览器）与 `qcc`（企查查 CLI）。
 
 ## 怎么回滚
 
-三种方式，按场景选：
-
-1. **只回滚某一个文件**（最常见，比如 rules.md 改坏了）
+1. **只回滚某一个文件**
 
 ```bash
-git checkout v1.0 -- skill/rules.md
+git checkout <commit> -- skill/rules/10-means.md
 ```
 
-2. **整目录回到 v1.0**
+2. **整目录回滚到某一历史版本**
 
 ```bash
-git checkout v1.0 -- skill/
+git checkout <commit> -- skill/
 ```
 
-3. **手上没有网络/没有仓库**：用发布里附的 `git bundle`（`patent-abnormal-screening-skill-v1.0.bundle`）恢复
-
-```bash
-git clone patent-abnormal-screening-skill-v1.0.bundle repo-restored
-```
+3. **两层流程之前的 11 维版本**：`git log --oneline -- skill/SKILL.md` 找到重写前的提交，按上面两种方式取回。
 
 ## 版本
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
-| v1.0 | 2026-11-05 | 基线。11 维全量判定；阈值：社保 <3、代理师 >500、⑤a >5（不论位次）、⑤b 严格一致 |
-| v2-draft | 2026-11-09 | 剔重名计数、1.1 研发能力兜底、跨机构、专精特新豁免、代理 ≥300（已合入 main） |
-| v2.1 | 2026-11-09 | ③ 先归四类再分流：非四类直接过；生活类/算法不过；机械装置/方法步骤图才判创新度 |
-| v2.1.1 | 2026-11-11 | 取数脚本与解析修正：香橼树取数脚本、发明人检索翻页取全、申请人列清洗（判据口径不变） |
-
-v2 的口径与理由见 `CHANGELOG.md` 与 `skill/rules/`。
+| v1.0 | 2026-11-05 | 基线。11 维全量判定；社保 <3、代理师 >500 |
+| v2.1.1 | 2026-11-11 | 11 维版本末版：剔重名、跨机构、专精特新豁免、③ 先归四类再分流 |
+| v3.0 | 2026-11-17 | 两层流程：文本层三项判据先行，存疑案才查主体 |
 
 ## 两条硬约束
 
-- **阈值只写在 `skill/rules/00-thresholds.md`**：改判据先改那张表，其余文件只引用编号（T01–T12），不重复写数字。
-- **发明人计数必须先剔重名**：按姓名检索会把同名他人算进来（`王猛` 窗口内可命中上万组），计数只认共同发明人锚定的记录；常见名窗口内 >1000 条判待核查。
+- **阈值只写在 `skill/rules/00-thresholds.md`**：改判据先改那张表，`scripts/text_screen.py` 的常量与之同步。
+- **发明人计数必须先剔重名**：按姓名检索会把同名他人算进来（`王猛` 窗口内可命中上万组），计数只认共同发明人锚定的记录；常见名判为存疑。
