@@ -143,3 +143,10 @@ python3 scripts/build_report.py 结果.json -o 报告.md --title 批次名
 - `scripts/text_screen.py` — 第一层打分
 - `scripts/build_report.py` — 结果 JSON 转简洁报告
 - `scripts/extract_pdf.py` — 解析；`scripts/cache.py`、`inco_*.py`、`xys_agent.py` — 第二层取数
+
+## 六、维护约定
+
+- **规则正文只写现行做法**：条件、阈值、步骤、示例。改规则时整句整段重写，不在保留的旧句后追加「（原……）」「（改为……）」这类补充。
+- **正文不写版本沿革**：不出现「原 skill」「原口径」「改为」「不再」「已由……替代」「旧版」「作废」这类表述。变更过程写仓库 `CHANGELOG.md`。
+- **判据口径以 `docs/非正常判定标准.md` 为准**：本文件与 `rules/` 的判据与标准冲突时，按标准改写 skill。
+- **阈值只改 `rules/00-thresholds.md`**：`scripts/text_screen.py` 的常量与之同步，别处不重复写数字。
