@@ -12,7 +12,7 @@
     means   {"hit": bool, "clauses": [...], "notes": [...]}
     effect  {"hit": bool, "clauses": [...], "notes": [...]}
     batch   {"state": "hit|miss|unevaluated", "note": str}   仅供第二层参考，不参与本层结论
-    verdict 非正常 | 待核
+    verdict 非正常 | 存疑 | 可提交
     hints   复核提示（结构案/仅缺验证数据，需人工看附图）
 
 判据编号与 `rules/00-thresholds.md` 对应；改阈值改那里，本文件同步改常量。
@@ -361,19 +361,22 @@ def batch_judge(cases: list[dict], from_input: bool) -> dict:
 
 
 def verdict_of(c: dict) -> tuple[str, list[str]]:
-    """第一层只判手段与效果：两项都成立即非正常，其余一律待核。
+    """第一层只判手段与效果：两项都成立即非正常，一项为存疑，两项都不成立为可提交。
 
-    批次与主体不在本层，未查之前不得出可提交。实用新型不适用效果判据，
-    因此在第一层永远不会出非正常，须进第二层由批次补齐。
+    批次与主体在第二层，只对存疑案跑。实用新型不适用效果判据，第一层只判手段：
+    手段成立记存疑（进第二层等批次），不成立记可提交。
     """
     hints = []
     if c["means"]["hit"] and any(k in c["means"]["clauses"] for k in ("第十条（结构堆砌）", "第九条第一项（部件罗列且从权凑数）")):
         hints.append("结构案：核对附图、装配关系与实物，确认后再定")
     if c["effect"]["hit"] and not c["means"]["hit"]:
         hints.append("仅缺验证数据：核对是否属于机械结构无参数的情形")
-    if c["means"]["hit"] and c["effect"]["hit"]:
+    n = int(c["means"]["hit"]) + int(c["effect"]["hit"])
+    if n >= 2:
         return "非正常", hints
-    return "待核", hints
+    if n == 1:
+        return "存疑", hints
+    return "可提交", hints
 
 
 def collect(paths: list[str]) -> list[str]:
@@ -415,7 +418,7 @@ def main() -> int:
 
     batch_judge(cases, args.batch_from_input)
 
-    summary = {"非正常": 0, "待核": 0}
+    summary = {"非正常": 0, "存疑": 0, "可提交": 0}
     rows = []
     for c in cases:
         v, hints = verdict_of(c)
