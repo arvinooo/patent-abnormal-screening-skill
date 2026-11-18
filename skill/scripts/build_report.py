@@ -50,7 +50,7 @@ def main() -> int:
     ap.add_argument("json")
     ap.add_argument("-o", "--out")
     ap.add_argument("--title", default="非正常申请筛查报告")
-    ap.add_argument("--note", default="", help="免责句下一行的补充说明，如送审范围与去重口径")
+
     args = ap.parse_args()
 
     rows = json.load(open(args.json, encoding="utf-8"))
@@ -59,9 +59,6 @@ def main() -> int:
     ok = [r for r in rows if r["verdict"] == "可提交"]
 
     L = [f"# {args.title}", "", DISCLAIMER, ""]
-    if args.note:
-        L.append(args.note)
-        L.append("")
     L.append(f"合计 {len(rows)} 件：非正常 {len(bad)} 件，正常 {len(ok)} 件，待核 {len(doubt)} 件。")
     L.append("")
 
@@ -72,11 +69,6 @@ def main() -> int:
         L.append("|---|---|---|---|")
         for i, r in enumerate(bad, 1):
             L.append(f"| {i} | {r.get('title') or r['pub']} | {r.get('applicant') or '—'} | {short_reason(r)} |")
-        notes = [r["batch"]["note"] for r in bad
-                 if r.get("batch", {}).get("state") == "hit" and r["batch"].get("note")]
-        if notes:
-            L.append("")
-            L.append(f"批次：{notes[0].split('：', 1)[-1]}。")
     else:
         L.append("无。")
     L.append("")
