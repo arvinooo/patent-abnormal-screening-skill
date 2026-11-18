@@ -1,0 +1,42 @@
+# Skill 维护规则
+
+> 给所有改这套 skill 的人与 AI。改本目录任何文件前先读这一页。
+
+## 一、正文怎么写
+
+- **只写现行做法**：条件、阈值、步骤、示例。读者只需要知道"现在怎么判"。
+- **整句整段重写**：改一条规则就重写那一段，不要在保留的旧句后面追加「（原……）」「（改为……）」「（不再……）」这类补充。
+- **禁用表述**：原 skill／原口径／原先／以前／原来是／改为／改成／调整为／替换为／不再／已由……替代／旧版／作废／遗留／v1、v2／本次新增。正文里出现这些词就是写错了。
+- **变更过程写仓库 `CHANGELOG.md`**：`SKILL.md`、`rules/`、`README.md`、报告模板一律不写版本沿革。
+- **要说明理由就写理由**：写"为什么这么定"（数据、副作用、边界），不写"以前怎么定的"。
+
+## 二、判据口径
+
+- 判据以仓库 `docs/非正常判定标准.md` 为准。skill 的规则与标准冲突时，**按标准改 skill**，不反过来改标准。
+- 第一层只判三项：手段、效果、批次。文件本身的其他问题（布局过窄、创造性不足、违法公德、同类多件拆分）不在判定范围，不据此出结论。
+- 第二层只判存疑案的主体事实，八项，任一成立即非正常。
+
+## 三、阈值与代码
+
+- 阈值只写在 `rules/00-thresholds.md`；`scripts/text_screen.py` 的常量与之一一对应，改一处必须改另一处。
+- 改判据要同步三处：`rules/` 的文字、`scripts/text_screen.py` 的实现、`cases.md` 的标定数据。
+- 报告格式由 `scripts/build_report.py` 决定，改格式改脚本，不靠手写。
+
+## 四、改完做什么
+
+1. 从 `.dsh/skills/patent-abnormal-screening/` 同步到仓库 `skill/`：
+
+   ```bash
+   rsync -a --delete --exclude=cache --exclude=__pycache__ \
+     <项目>/非正常/.dsh/skills/patent-abnormal-screening/ <仓库>/skill/
+   ```
+
+2. `diff -rq --exclude=cache --exclude=__pycache__` 校验两边一致。
+3. 改 `CHANGELOG.md`：中文一句话标题 + 3–6 条要点，只写这次改了什么。
+4. 提交并推送 `origin main`，提交人 `arvinooo <2943781161@qq.com>`，不加 AI 署名尾注。
+
+## 五、不要碰
+
+- 不提交客户文本（`测试用例/`）、跑批结果（`results/`）、凭据、`cache/`。
+- 不删 `cache/` 下的外部取数结果。
+- 不用 `git push --force`。
