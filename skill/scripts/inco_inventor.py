@@ -37,28 +37,49 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import inco_client as INCO
 
+COMMON_NAMES = set("""张伟 王伟 王芳 李娜 刘洋 李伟 王静 张敏 李静 王秀英 张丽 李秀英
+刘伟 王强 张杰 李强 王勇 张军 李军 王杰 张勇 李勇 刘杰 王涛""".split())
+
+
+def _window(anchor: str | None) -> tuple[str, str]:
+    """滚动 12 个月窗口：锚点往前 365 天（含锚点当天）。"""
+    a = anchor or dt.date.today().isoformat()
+    try:
+        end = dt.date.fromisoformat(a)
+    except ValueError:
+        end = dt.date.today()
+    start = end - dt.timedelta(days=365)
+    return start.strftime("%Y%m%d"), end.strftime("%Y%m%d")
+
 
 def fetch_one(name: str, anchor: str | None, co: list[str]) -> dict:
-    import v2_fetch as F
-    rec = F.inventor_records(name, anchor or None, co_inventors=[name] + co)
+    start, end = _window(anchor)
+    rec = INCO.inventor_patents(name, start, end)
+    records = rec.get("records") or []
+    # 剔重名：对其余发明人各跑一次同窗口检索，按申请号求交集标共同发明人
+    others = [x for x in co if x and x != name]
+    for other in others:
+        r2 = INCO.inventor_patents(other, start, end)
+        hit = {x.get("app_no") or x.get("pub") for x in (r2.get("records") or [])}
+        hit.discard("")
+        for r in records:
+            k = r.get("app_no") or r.get("pub")
+            if k and k in hit:
+                r.setdefault("co_inventors", [])
+                if other not in r["co_inventors"]:
+                    r["co_inventors"].append(other)
     return {
         "inventor": name,
-        "window": [rec.get("window_start"), rec.get("window_end")],
-        "anchor": rec.get("anchor"),
+        "window": [start, end],
+        "anchor": anchor or dt.date.today().isoformat(),
         "expr": rec.get("expr"),
         "total_raw": rec.get("total_raw"),
         "stat": rec.get("stat") or {},
-        "records": [{
-            "pub": r.get("pub"), "app_no": r.get("app_no"),
-            "app_date": r.get("app_date"), "pub_date": r.get("pub_date"),
-            "title": r.get("title"), "applicants": r.get("applicants") or [],
-            "ipc": r.get("ipc"), "type": r.get("type"),
-            "co_inventors": r.get("co_inventors") or [],
-        } for r in (rec.get("records") or [])],
-        "common_name": rec.get("common_name"),
+        "count": len(records),
+        "records": records,
+        "common_name": name in COMMON_NAMES,
         "errors": rec.get("errors") or [],
-        "_source": rec.get("_source"),
-        "_fetched": rec.get("_fetched"),
+        "_source": "incoPat 结果行（按申请号去重）",
     }
 
 

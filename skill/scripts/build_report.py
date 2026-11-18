@@ -25,6 +25,9 @@ SHORT = {
 
 
 def short_reason(case: dict) -> str:
+    # 逐案 JSON 已给出结论句式时优先用它（第二层结论、人工复核结论都在这里）
+    if case.get("reason"):
+        return case["reason"]
     parts = []
     for c in case.get("means", {}).get("clauses", []):
         parts.append(SHORT.get(c, c).replace("{n}", str(case.get("refs", ""))))
@@ -79,6 +82,18 @@ def main() -> int:
             lines.append(f"| {i} | {r.get('title') or r['pub']} | {r.get('applicant') or '—'} | {short_reason(r)} |")
     else:
         lines.append("无。")
+
+    hints = [(r.get("title") or r["pub"], h) for r in bad + doubt
+             for h in (r.get("hints") or [])]
+    if hints:
+        lines.append("")
+        lines.append("复核提示：")
+        seen = set()
+        for title, h in hints:
+            if h in seen:
+                continue
+            seen.add(h)
+            lines.append(f"- {h}（{title}）")
 
     text = "\n".join(lines)
     if args.out:

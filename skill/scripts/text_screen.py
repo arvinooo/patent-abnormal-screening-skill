@@ -84,35 +84,67 @@ def read_text(path: str) -> str:
 
 def clean_claims(cl: str) -> str:
     s = re.sub(r"(?:权利要求书|说明书)\d+/\d+页", "", cl)
+    s = re.sub(r"(?:权利要求书|说明书)\s*\d{1,3}", "", s)   # 稿件式页脚：权利要求书2 / 说明书5
     s = re.sub(r"CN\d{9}[A-Z]\d{4}\.\d{2}\.\d{2}", "", s)
     s = re.sub(r"CN\d{9}[A-Z]", "", s)
     return re.sub(r"\d{4}\.\d{2}\.\d{2}", "", s)
+
+
+# 稿件式文本（Word 转 PDF、未带著录项首页）的章节定位
+DOC_TITLE = re.compile(r"说明书\s*\d{1,2}([^。；，、]{4,40}?)技术领域")
+
+
+def claim_start(n: str) -> int:
+    """稿件式文本：第一处「权利要求书」标题之后的第 1 项起点（页脚页码、Word 域代码会夹在中间）。"""
+    for mm in re.finditer(r"权利要求书", n):
+        seg = n[mm.end(): mm.end() + 80]
+        c = re.search(r"1\s*[.．、]\s*(?=[\u4e00-\u9fa5])", seg)
+        if c:
+            return mm.end() + c.start()
+    return -1
 
 
 def split_sections(t: str) -> tuple[str, str, str]:
     """返回 (首页著录项, 权利要求书, 说明书)。"""
     n = norm(t)
     m = re.search(r"权利要求书\s*\d+\s*页\s*说明书\s*\d+\s*页(?:\s*附图\s*\d+\s*页)?", n)
-    hdr_end = m.end() if m else n.find("(57)") + 40
-    foots = [f for f in re.finditer(r"权利要求书\d+/\d+页", n) if f.start() > hdr_end]
-    if foots:
-        cend = foots[-1].end()
-    else:
-        i = n.find("技术领域", hdr_end)
-        cend = i if i > 0 else hdr_end + 6000
-    return n[:hdr_end], clean_claims(n[hdr_end:cend]), n[cend:]
+    if m:
+        hdr_end = m.end()
+        foots = [f for f in re.finditer(r"权利要求书\d+/\d+页", n) if f.start() > hdr_end]
+        if foots:
+            cend = foots[-1].end()
+        else:
+            i = n.find("技术领域", hdr_end)
+            cend = i if i > 0 else hdr_end + 6000
+        return n[:hdr_end], clean_claims(n[hdr_end:cend]), n[cend:]
+
+    # 稿件式文本：无「权利要求书N页 说明书M页」页脚，按章标题定位
+    cs = claim_start(n)
+    if cs < 0:
+        i = n.find("(57)")
+        hdr_end = i + 40 if i > 0 else 0
+        j = n.find("技术领域", hdr_end)
+        cend = j if j > 0 else hdr_end + 6000
+        return n[:hdr_end], clean_claims(n[hdr_end:cend]), n[cend:]
+    i = n.find("技术领域", cs)
+    cend = i if i > 0 else min(len(n), cs + 8000)
+    claims = n[cs:cend]
+    tail = re.search(r"说明书\s*\d{0,2}[^。；，]*$", claims)
+    if tail:
+        claims = claims[: tail.start()]
+    return n[:cs], clean_claims(claims), n[cend:]
 
 
 def claim1_of(claims: str) -> str:
     cl = claims.lstrip("。；")
-    m = re.search(r"(?:^|。)(2)[.．](?=[\u4e00-\u9fa5])", cl)
+    m = re.search(r"(?:^|。)(2)[.．、](?=[\u4e00-\u9fa5])", cl)
     return cl[: m.start() + 1] if m else cl
 
 
 def claims_of(claims: str) -> list[tuple[int, str]]:
     cl = claims.lstrip("。；")
     cands = [(m.start() + (1 if m.group(0)[0] in "。；" else 0), int(m.group(1)))
-             for m in re.finditer(r"(?:^|[。；])(\d{1,2})[.．](?=[\u4e00-\u9fa5])", cl)]
+             for m in re.finditer(r"(?:^|[。；])(\d{1,2})[.．、](?=[\u4e00-\u9fa5])", cl)]
     best, cur = [], []
     for pos, num in cands:
         if not cur:
@@ -181,26 +213,38 @@ def features(t: str) -> dict:
     core = desc[i:j]
     f["form_core"] = len(re.findall(FORM, core))
     f["eq_all"] = len(re.findall(r"[=＝]", desc))
-    # 著录项
-    f["util"] = "实用新型专利" in hdr
-    m = re.search(r"\(22\)申请日([\d.]+)", hdr)
-    f["app_date"] = m.group(1) if m else ""
-    i = hdr.find("(74)")
+    # 著录项（著录项首页可能用全角括号，统一后再匹配）
+    h = hdr.replace("（", "(").replace("）", ")")
+    f["util"] = "实用新型专利" in h
+    if not f["util"] and "发明专利申请" not in h:
+        # 稿件式文本无 (12) 行，按正文自称判定
+        um = len(re.findall("本实用新型", t))
+        iv = len(re.findall("本发明", t))
+        f["util"] = um >= 3 and iv == 0
+    m = re.search(r"\(22\)申请日\D*(\d{8}|\d{4}\.\d{2}\.\d{2})", h)
+    ad = m.group(1) if m else ""
+    if not ad:
+        m = re.search(r"申请日[:：]?\s*(\d{8})", h)
+        ad = f"{m.group(1)[:4]}.{m.group(1)[4:6]}.{m.group(1)[6:]}" if m else ""
+    f["app_date"] = ad
+    i = h.find("(74)")
     ag = ""
     if i > 0:
-        blk = hdr[i:]
+        blk = h[i:]
         j = blk.find("(51)")
         if j > 0:
             blk = blk[:j]
         ag = blk.replace("(74)专利代理机构", "").split("专利代理师")[0]
     f["agency"] = ag
-    m = re.search(r"\((?:71|73)\)(?:申请人|专利权人)(.*?)(?=\(72\)|\(74\)|\(51\))", hdr)
+    m = re.search(r"\((?:71|73)\)(?:申请人|专利权人)(.*?)(?=\(72\)|\(74\)|\(51\))", h)
     ap = ""
     if m:
         parts = [x for x in re.split(r"地址[^专]*?(?=申请人|专利权人|$)", m.group(1)) if x.strip()]
         ap = ";".join(x.strip() for x in parts)
     f["applicant"] = ap
-    m = re.search(r"\(54\)发明名称(.+?)(?:\(57\)|摘要)", hdr)
+    m = re.search(r"\(54\)发明名称(.+?)(?:\(57\)|摘要)", h)
+    if not m:
+        m = DOC_TITLE.search(hdr)
     f["title"] = m.group(1)[:60] if m else ""
     bg = ""
     i = desc.find("背景技术")
@@ -249,8 +293,10 @@ def means_judge(f: dict) -> dict:
             and f["param"] < T["param_few"]:
         hits.append("第九条第二项（仅一个实施例且无工作过程）")
 
+    # 「管理」出现在设备名里（电池管理、热管理）不算事项型，独权有实体结构即排除本款
     if f["mgmt"] >= T["mgmt_n"] and f["var_def"] < 6 and f["form"] == 0 \
-            and f["exp"] <= 1 and f["param"] < T["param_few"]:
+            and f["exp"] <= 1 and f["param"] < T["param_few"] \
+            and f["c1_struct"] < 3 and f["c1_refs"] < 4:
         hits.append("第十二条（技术问题不落地）")
 
     return {"hit": bool(hits), "clauses": hits, "notes": notes}

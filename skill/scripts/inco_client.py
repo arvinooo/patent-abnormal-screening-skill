@@ -217,9 +217,12 @@ def is_logged_in(user: str | None = None, sid: str | None = None,
     if "newLogin" in url or "login" in url.lower():
         return False
     if user:
-        return user in body
+        if user in body:
+            return True
+        # 账号名不一定渲染在检索页上，退一步看检索入口是否可用
+        return ("检索" in body) and ("登录" not in body[:120])
     # 无账号名可比时：首页有「检索/帮助中心」且没有「登录」按钮即可视为已登录
-    return ("帮助中心" in body) and ("登录" not in body[:80])
+    return ("帮助中心" in body or "检索" in body) and ("登录" not in body[:80])
 
 
 def login(user: str, password: str, sid: str | None = None,
@@ -360,6 +363,9 @@ def _read_result(expr: str, sid: str, tid: str) -> dict:
 
 _PUB_RE = re.compile(r"\bCN\d{6,12}[A-Z]\b")
 _APPNO_RE = re.compile(r"\bCN\d{8,13}(?:\.\d)?\b")
+# 非 CN 记录（TW/US/EP 等）：结果行按字段标签取，否则去重键为空、记录被静默丢弃
+_APPNO_LBL = re.compile(r"申请号[：:]\s*([A-Za-z]{0,3}\d[\w.]*)")
+_PUB_LBL = re.compile(r"公开\(公告\)号[：:]\s*([A-Za-z]{0,3}\d[\w]*)")
 _IPC_RE = re.compile(r"\b[A-H]\d{2}[A-Z]\s?\d+/\d+\b")
 _DATE_RE = re.compile(r"\b(20\d{6}|19\d{6})\b")
 _AP_RE = re.compile(r"[\u4e00-\u9fff（）()·A-Za-z]{2,40}(?:公司|大学|学院|研究院|研究所|中心|厂|局|医院|集团|合作社)")
@@ -384,6 +390,10 @@ def parse_row(raw: str) -> dict:
     """把结果行文本解析成字段。行结构见 incoPat 结果页「图文浏览 → 列表」。"""
     pubs = _PUB_RE.findall(raw) or _APPNO_RE.findall(raw)
     app_nos = _APPNO_RE.findall(raw)
+    if not app_nos:
+        app_nos = _APPNO_LBL.findall(raw)
+    if not pubs:
+        pubs = _PUB_LBL.findall(raw)
     ipcs = _IPC_RE.findall(raw)
     dates = _DATE_RE.findall(raw)
     apps = _AP_RE.findall(raw)

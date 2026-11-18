@@ -29,8 +29,8 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import cache as CA
 import inco_client as INCO
-import v2_fetch as F
 
 XYS = "https://main.xysip.com/#/pt/orgData/agentYearStatistics"
 XYS_HOST = "xysip.com"
@@ -128,10 +128,28 @@ def _parse_row(row: str, name: str) -> dict:
     return {"months": groups, "total": total}
 
 
+def cache_get(ns: str, key: str, max_age: float = 30) -> dict | None:
+    """按 cache.py 的口径读缓存；未命中/过期/口径不符一律返回 None。"""
+    rec = CA._load(ns).get(key)
+    if not rec or not CA._schema_ok(ns, rec) or CA._age_days(rec) > max_age:
+        return None
+    return rec
+
+
+def cache_set(ns: str, key: str, payload: dict) -> None:
+    data = dict(payload)
+    data.setdefault("_schema", CA.SCHEMA.get(ns, 1))
+    data["_fetched"] = payload.get("_fetched") or dt.date.today().isoformat()
+    data["_set_at"] = dt.datetime.now().isoformat(timespec="seconds")
+    store = CA._load(ns)
+    store[key] = data
+    CA._save(ns, store)
+
+
 def fetch_year(name: str, year: int, use_cache: bool = True) -> dict:
     key = f"{name}|{year}"
     if use_cache:
-        hit = F.cache_get("xys_month", key, max_age=30)
+        hit = cache_get("xys_month", key, max_age=30)
         if hit:
             hit["_cached"] = True
             return hit
@@ -161,7 +179,7 @@ def fetch_year(name: str, year: int, use_cache: bool = True) -> dict:
            "month_sum": sum(rec["months"]),
            "_source": "香橼树 代理师月度统计（bsk）",
            "_fetched": dt.date.today().isoformat()}
-    F.cache_set("xys_month", key, out)
+    cache_set("xys_month", key, out)
     return out
 
 
@@ -211,7 +229,7 @@ def window_total(name: str, anchor: dt.date, use_cache: bool = True) -> dict:
            "scope": "本所口径·取总量(含公海)",
            "_source": "香橼树 代理师月度统计（bsk）",
            "_fetched": dt.date.today().isoformat()}
-    F.cache_set("agent_month", f"{name}|{anchor.isoformat()}",
+    cache_set("agent_month", f"{name}|{anchor.isoformat()}",
                 dict(out, _schema=2))
     return out
 
