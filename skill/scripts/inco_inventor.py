@@ -10,11 +10,13 @@
     1) 窗口内件数（1.2）
        expr = IN=(姓名) AND AD=[窗口起 TO 窗口止]
        结果行按申请号去重计件；页脚每页调 100，必要时翻页。
-    2) 共同发明人（剔重名用）
-       对 --co 给出的本案其余发明人各跑一次同窗口 IN=(...)，
-       与候选记录按申请号求交集，标 co_inventors。
+    2) 剔重名（rules/40-inventor.md §2）
+       窗口内同名记录 ≤300：拉全量，对 --co 各跑一次同窗口检索，按申请号求交集标 co_inventors。
+       窗口内同名记录 >300（常见名溢出）：不拉全量，改用交集式
+         IN=(第一发明人) AND IN=(其余发明人) AND AD=[窗口] 直接计数。
+       本案只有一个发明人时传 --applicant，改用 AP=(申请人) AND IN=(发明人) 锚定。
 
-窗口：默认锚点=今天，往前 365 天；有本案申请日时传 --anchor。
+窗口：默认锚点=今天，往前 365 天；有本案申请日时传 --anchor（有申请号先从 incoPat 取回申请日）。
 
 输出（stdout，JSON）:
     {"inventor":"焦劼","window":[start,end],"total_raw":16,
@@ -52,16 +54,71 @@ def _window(anchor: str | None) -> tuple[str, str]:
     return start.strftime("%Y%m%d"), end.strftime("%Y%m%d")
 
 
-def fetch_one(name: str, anchor: str | None, co: list[str]) -> dict:
+def _dedup(rows: list[dict]) -> list[dict]:
+    """按申请号去重（一案双申、A/B 文本算 1 件）。"""
+    seen, out = set(), []
+    for x in rows:
+        k = x.get("app_no") or x.get("pub")
+        if not k or k in seen:
+            continue
+        seen.add(k)
+        out.append(x)
+    return out
+
+
+def _collect(expr: str) -> dict:
+    """跑一次检索并按申请号去重取全记录。"""
+    r = INCO.search(expr, all_pages=True)
+    return {"expr": expr, "total_raw": r.get("count"), "stat": r.get("stat") or {},
+            "records": _dedup(r.get("rows") or []), "error": r.get("error")}
+
+
+def fetch_one(name: str, anchor: str | None, co: list[str],
+              applicant: str = "", cap: int = 300) -> dict:
     start, end = _window(anchor)
-    rec = INCO.inventor_patents(name, start, end)
-    records = rec.get("records") or []
-    # 剔重名：对其余发明人各跑一次同窗口检索，按申请号求交集标共同发明人
+    win = f"AD=[{start} TO {end}]"
     others = [x for x in co if x and x != name]
+    base = INCO.search(f"IN=({name}) AND {win}")
+    total = base.get("count")
+    if total is None:
+        return {"inventor": name, "window": [start, end], "count": None,
+                "common_name": name in COMMON_NAMES,
+                "error": base.get("error") or "检索未返回条数"}
+
+    if total > cap:
+        # 常见名溢出：不拉全量，用交集缩小到可确认同一人的集合
+        if others:
+            union: dict = {}
+            for other in others:
+                c = _collect(f"IN=({name}) AND IN=({other}) AND {win}")
+                for rec in c["records"]:
+                    union.setdefault(rec.get("app_no") or rec.get("pub"), rec)
+            recs = list(union.values())
+            return {"inventor": name, "window": [start, end],
+                    "anchor": anchor or dt.date.today().isoformat(),
+                    "total_raw": total, "count": len(recs), "records": recs,
+                    "mode": "intersect", "co": others,
+                    "common_name": name in COMMON_NAMES,
+                    "note": ("按共同发明人交集剔重名：同一人的记录=与%s共同署名的记录；"
+                             "交集为 0 时件数按 0 记" % "/".join(others))}
+        if applicant:
+            c = _collect(f"AP=({applicant}) AND IN=({name}) AND {win}")
+            recs = c["records"]
+            return {"inventor": name, "window": [start, end],
+                    "anchor": anchor or dt.date.today().isoformat(),
+                    "total_raw": total, "count": len(recs), "records": recs,
+                    "mode": "applicant", "applicant": applicant,
+                    "note": "单发明人无法求交集，按申请人锚定计数（cross-org 亦限该集合）"}
+        return {"inventor": name, "window": [start, end], "count": None,
+                "total_raw": total, "common_name": True if name in COMMON_NAMES else None,
+                "note": "常见名溢出且无共同发明人/申请人可锚定，保持存疑"}
+
+    rec = _collect(f"IN=({name}) AND {win}")
+    records = rec["records"]
+    # 未溢出：仍按共同发明人交集标 co_inventors，便于逐条核对
     for other in others:
-        r2 = INCO.inventor_patents(other, start, end)
-        hit = {x.get("app_no") or x.get("pub") for x in (r2.get("records") or [])}
-        hit.discard("")
+        r2 = _collect(f"IN=({name}) AND IN=({other}) AND {win}")
+        hit = {x.get("app_no") or x.get("pub") for x in r2["records"]}
         for r in records:
             k = r.get("app_no") or r.get("pub")
             if k and k in hit:
@@ -69,16 +126,11 @@ def fetch_one(name: str, anchor: str | None, co: list[str]) -> dict:
                 if other not in r["co_inventors"]:
                     r["co_inventors"].append(other)
     return {
-        "inventor": name,
-        "window": [start, end],
+        "inventor": name, "window": [start, end],
         "anchor": anchor or dt.date.today().isoformat(),
-        "expr": rec.get("expr"),
-        "total_raw": rec.get("total_raw"),
-        "stat": rec.get("stat") or {},
-        "count": len(records),
-        "records": records,
-        "common_name": name in COMMON_NAMES,
-        "errors": rec.get("errors") or [],
+        "expr": rec["expr"], "total_raw": total, "stat": rec["stat"],
+        "count": len(records), "records": records, "mode": "full",
+        "common_name": name in COMMON_NAMES, "errors": [],
         "_source": "incoPat 结果行（按申请号去重）",
     }
 
@@ -88,7 +140,8 @@ def main(argv):
     ap.add_argument("name", nargs="?", help="单个发明人姓名")
     ap.add_argument("--names", help="逗号分隔的多个发明人")
     ap.add_argument("--anchor", help="窗口锚点（本案申请日，YYYY-MM-DD）；缺省用今天")
-    ap.add_argument("--co", default="", help="本案其余发明人，逗号分隔（用于共同发明人反查）")
+    ap.add_argument("--co", default="", help="本案其余发明人，逗号分隔（用于交集剔重名）")
+    ap.add_argument("--applicant", default="", help="本案申请人（单发明人、常见名溢出时用它锚定）")
     ap.add_argument("--out", help="写出的 JSON 文件")
     a = ap.parse_args(argv[1:])
 
@@ -101,7 +154,7 @@ def main(argv):
     results = []
     for n in names:
         print(f"[取数] {n} …", file=sys.stderr)
-        results.append(fetch_one(n, a.anchor, co))
+        results.append(fetch_one(n, a.anchor, co, applicant=a.applicant))
 
     out = {"anchor": a.anchor or dt.date.today().isoformat(),
            "co_inventors": co, "results": results,
