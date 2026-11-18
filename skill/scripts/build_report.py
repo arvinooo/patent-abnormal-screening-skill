@@ -8,7 +8,7 @@
 
 写法：每案一行，原因一句话，写文档里看到的事实；不写条款号、不写内部代号、不带证据原文。
 输入字段：title / applicant / verdict / reason（有 reason 时优先用），means / effect / batch 用于兜底生成原因。
-对外表述：可提交 → 正常；存疑 → 待核。
+对外表述：可提交 → 正常；存疑、待核 → 待核。
 """
 from __future__ import annotations
 
@@ -42,6 +42,8 @@ def short_reason(case: dict) -> str:
         return "；".join(parts)
     if case.get("batch", {}).get("state") == "hit":
         return "仅批次一项成立，文本层面未见其他异常"
+    if case.get("verdict") == "待核":
+        return "文本两项均未命中，批次与主体未核"
     return "—"
 
 
@@ -55,7 +57,7 @@ def main() -> int:
 
     rows = json.load(open(args.json, encoding="utf-8"))
     bad = [r for r in rows if r["verdict"] == "非正常"]
-    doubt = [r for r in rows if r["verdict"] == "存疑"]
+    doubt = [r for r in rows if r["verdict"] in ("存疑", "待核")]
     ok = [r for r in rows if r["verdict"] == "可提交"]
 
     L = [f"# {args.title}", "", DISCLAIMER, ""]

@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""第 1 层：专利公开文本的三项判据筛查（只看文件本身，不取申请人/发明人数据）。
+"""第 1 层：专利公开文本的两项判据筛查（手段、效果；只看文件本身，不取外部数据）。
 
 用法:
     python3 scripts/text_screen.py <目录或 PDF/文本 列表...> [--json out.json] [--batch-from-input]
     python3 scripts/text_screen.py 测试用例/某批 --json 结果.json
     python3 scripts/text_screen.py a.pdf b.pdf
-    python3 scripts/text_screen.py 某批 --batch-from-input   # 送审文件覆盖当月全部时
+    python3 scripts/text_screen.py 某批 --batch-from-input   # 第二层批次用；送审文件覆盖机构当月全部时
 
 输出（stdout，一行一案的 JSON，最后一行是汇总）:
     pub / applicant / agency / app_date / title
     means   {"hit": bool, "clauses": [...], "notes": [...]}
     effect  {"hit": bool, "clauses": [...], "notes": [...]}
-    batch   {"state": "hit|miss|unevaluated", "note": str}
-    verdict 非正常 | 存疑 | 可提交
-    hints   复核提示（结构案/无数据案，需人工看附图）
+    batch   {"state": "hit|miss|unevaluated", "note": str}   仅供第二层参考，不参与本层结论
+    verdict 非正常 | 待核
+    hints   复核提示（结构案/仅缺验证数据，需人工看附图）
 
 判据编号与 `rules/00-thresholds.md` 对应；改阈值改那里，本文件同步改常量。
 依赖: pypdf（缺失时回退 pdfplumber）
@@ -361,17 +361,19 @@ def batch_judge(cases: list[dict], from_input: bool) -> dict:
 
 
 def verdict_of(c: dict) -> tuple[str, list[str]]:
-    n = int(c["means"]["hit"]) + int(c["effect"]["hit"]) + int(bool(c.get("_batch")))
+    """第一层只判手段与效果：两项都成立即非正常，其余一律待核。
+
+    批次与主体不在本层，未查之前不得出可提交。实用新型不适用效果判据，
+    因此在第一层永远不会出非正常，须进第二层由批次补齐。
+    """
     hints = []
     if c["means"]["hit"] and any(k in c["means"]["clauses"] for k in ("第十条（结构堆砌）", "第九条第一项（部件罗列且从权凑数）")):
         hints.append("结构案：核对附图、装配关系与实物，确认后再定")
-    if c["effect"]["hit"] and not c["means"]["hit"] and not c.get("_batch"):
+    if c["effect"]["hit"] and not c["means"]["hit"]:
         hints.append("仅缺验证数据：核对是否属于机械结构无参数的情形")
-    if n >= 2:
+    if c["means"]["hit"] and c["effect"]["hit"]:
         return "非正常", hints
-    if n == 1:
-        return "存疑", hints
-    return "可提交", hints
+    return "待核", hints
 
 
 def collect(paths: list[str]) -> list[str]:
@@ -413,7 +415,7 @@ def main() -> int:
 
     batch_judge(cases, args.batch_from_input)
 
-    summary = {"非正常": 0, "存疑": 0, "可提交": 0}
+    summary = {"非正常": 0, "待核": 0}
     rows = []
     for c in cases:
         v, hints = verdict_of(c)
