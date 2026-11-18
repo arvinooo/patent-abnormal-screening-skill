@@ -5,7 +5,7 @@ description: Use when the user supplies Chinese patent application text (PDF 公
 
 # 专利非正常申请筛查（两层流程）
 
-**第一层只读文件**：手段、效果、批次三项判据，判的是 PDF 主体写得怎么样。判据口径以 `docs/非正常判定标准.md` 为准，三项之外不加判据；文件本身的其他问题——权利要求布局过窄、创造性不足、违法公德、同类多件拆分——不在本流程的判定范围，不据此出结论。
+**第一层只读文件**：手段、效果、批次三项判据，判的是 PDF 主体写得怎么样。判据条文见本目录 `docs/非正常判定标准.md`（第三章手段、第四章效果、第五章批次），三项之外不加判据；文件本身的其他问题——权利要求布局过窄、创造性不足、违法公德、同类多件拆分——不在本流程的判定范围，不据此出结论。
 **第二层只处理存疑案**：判**文件之外**的主体事实——发明人件数、跨机构、授权发明专利、代理师代理量、①类型、①科技属性、①社保、①主营匹配。任一项成立即非正常，全不成立即可提交。
 
 这样排的依据：文本层在 516 件已确认样本上处理掉 77% 的案子，只有约四分之一需要取数。各判据的实测数据见 `cases.md`。
@@ -18,9 +18,10 @@ description: Use when the user supplies Chinese patent application text (PDF 公
 第 -1 步 查缓存（PATENT_CACHE_DIR，默认 ./cache）+ results/ 同批结果，命中直接用
 第 0 步  读案：从首页取申请人、发明人、代理机构、申请日、类型；无申请日则用查询日做窗口锚点
 第 1 步  文本层（本地，不取数）：python3 scripts/text_screen.py <本批目录>
-         1a 手段判据（第八条~第十三条）
-         1b 效果判据（第十四条~第十七条）
-         1c 批次判据（第十八条~第二十条）——件数与申请人数按代理机构代码查该月全部申请，见 rules/30-batch.md
+         判定依据：docs/非正常判定标准.md（条文）＋ rules/（执行细则与阈值）；两者冲突以标准为准
+         1a 手段判据（第八条~第十三条）           rules/10-means.md
+         1b 效果判据（第十四条~第十七条）         rules/20-effect.md
+         1c 批次判据（第十八条~第二十条）——件数与申请人数按代理机构代码查该月全部申请，rules/30-batch.md
          输出三档
 第 2 步  第二层（只对"存疑"案，八项全跑，任一成立即非正常）
          1  前置资质：查专精特新（rules/90-exemptions.md），命中则企业类五项标豁免
@@ -138,6 +139,7 @@ python3 scripts/build_report.py 结果.json -o 报告.md --title 批次名
 - `rules/60-subject.md` — 第二层：①类型 / ①科技属性 / ①社保 / ①主营匹配 / 授权发明专利
 - `rules/65-agency.md` — 第二层：代理师代理量
 - `rules/90-exemptions.md` — 专精特新豁免（企业类五项 + 授权发明专利）
+- `docs/非正常判定标准.md` — 判定条文（第三章手段、第四章效果、第五章批次），报告可给委托方
 - `data-sources.md` — 取数字段码、检索式、缓存
 - `cases.md` — 标定数据与判例
 - `scripts/text_screen.py` — 第一层打分
@@ -146,4 +148,4 @@ python3 scripts/build_report.py 结果.json -o 报告.md --title 批次名
 
 ## 六、维护约定
 
-改本 skill 前先读同目录 `AGENTS.md`，那里是维护规则的全文：正文只写现行做法、不写新旧对照、变更记 `CHANGELOG.md`、判据冲突以 `docs/非正常判定标准.md` 为准、阈值只改 `rules/00-thresholds.md`。
+改本 skill 前先读同目录 `AGENTS.md`，那里是维护规则的全文：正文只写现行做法、不写新旧对照、变更记 `CHANGELOG.md`、判据冲突以本目录 `docs/非正常判定标准.md` 为准、阈值只改 `rules/00-thresholds.md`。
