@@ -12,7 +12,7 @@
     means   {"hit": bool, "clauses": [...], "notes": [...]}
     effect  {"hit": bool, "clauses": [...], "notes": [...]}
     batch   {"state": "hit|miss|unevaluated", "note": str}   仅供第二层参考，不参与本层结论
-    verdict 非正常 | 存疑 | 可提交
+    verdict 非正常 | 存疑 | 正常
     hints   复核提示（结构案/仅缺验证数据，需人工看附图）
 
 判据编号与 `rules/00-thresholds.md` 对应；改阈值改那里，本文件同步改常量。
@@ -29,24 +29,29 @@ import sys
 
 # ---------------------------------------------------------------- 常量（对齐 rules/00-thresholds.md）
 T = {
-    "refs_stack": 12,      # 第十条 结构堆砌：权1 部件数
-    "asm_stack": 5,        # 第十条 结构堆砌：装配关系处数
-    "refs_dep": 20,        # 第九条第一项：权1 部件数
-    "asm_dep": 4,          # 第九条第一项：装配关系处数
-    "dep_n": 6,            # 第九条第一项：从权条数
-    "unit_n": 3,           # 第八条第三项：模块化处数
-    "act_n": 3,            # 第八条第一项：通用动作种类
-    "proc_n": 3,           # 第八条第一项：工艺动作处数
-    "exp_single": 1,       # 说明书仅一个实施例
-    "param_few": 5,        # 说明书参数少于 5 处
-    "mgmt_n": 8,           # 第十二条：事项型词频
-    "batch_n": 10,         # 第十八条：同月件数
-    "batch_app": 6,        # 第十八条：同月申请人数
-    "cite_ratio": 0.20,    # 第十八条：引用在先文献比例上限
-    "bg_ratio": 0.50,      # 第十八条：背景技术达 400 字比例上限
-    "year_n": 30,          # 第十八条累计口径：12 个月件数
-    "year_app": 15,        # 第十八条累计口径：12 个月申请人数
+    "refs_stack": 12,      # 第十二条 结构堆砌：权1 部件数（仅发明）
+    "asm_stack": 5,        # 第十二条 结构堆砌：装配关系处数
+    "refs_dep": 20,        # 第十一条第一项：权1 部件数
+    "asm_dep": 4,          # 第十一条第一项：装配关系处数
+    "dep_n": 6,            # 第十一条第一项：从权条数
+    "unit_n": 3,           # 第十条 功能性模块：模块化处数
+    "act_ratio": 0.6,      # 第九条第一项：通用动作分句占比
+    "proc_n": 3,           # 第九条第二项：工艺动作处数
+    "exp_single": 1,       # 第十一条第二项：说明书仅一个实施例
+    "param_few": 5,        # 第十一条第二项：说明书参数少于 5 处
+    "mgmt_n": 8,           # 第十四条：事项型词频
+    "batch_n": 10,         # 第二十条第一款：同月件数
+    "batch_app": 6,        # 第二十条第一款：同月申请人数
+    "cite_ratio": 0.20,    # 第二十条：引用在先文献比例上限
+    "bg_ratio": 0.50,      # 第二十条：背景技术达 400 字比例上限
+    "year_n": 30,          # 第二十条第三款：12 个月件数
+    "year_app": 15,        # 第二十条第三款：12 个月申请人数
 }
+
+MODEL = (r"(?:CNN|LSTM|GRU|U-?Net|YOLO|Transformer|BERT|ResNet|GAN|卷积|神经网络|注意力|"
+         r"特征图|损失函数|梯度|编码器|解码器|随机森林|支持向量机|决策树|聚类|回归模型|深度学习)")
+TESTRES = (r"(?:测试|检测|试验|实验|性能)(?:结果|数据)[^。；]{0,80}?\d+(?:\.\d+)?"
+           r"|(?:腐蚀率|除垢率|抗菌率|抗拉强度|伸长率|检出限|回收率|精密度|纯度)[^。；]{0,40}?\d+(?:\.\d+)?")
 
 PARAM = (r"\d+(?:\.\d+)?\s*(?:%|％|mm|cm|℃|MPa|kPa|kg|g|L|mL|倍|r/min|rpm|min|s|h|"
          r"Hz|kHz|MHz|GHz|A|V|W|kW|N·m|dB|μm|nm|重量份|份|目|m/s|度|°|转|次)")
@@ -177,6 +182,9 @@ def features(t: str) -> dict:
     f["claim_n"] = len(cl)
     f["c1_refs"] = len(re.findall(r"[（(]\s*\d{1,3}\s*[）)]", c1))
     f["c1_act"] = len(set(re.findall(ACT, c1)))
+    clauses = [s for s in re.split(r"[；;。]", c1) if s.strip()]
+    f["c1_act_ratio"] = (round(sum(1 for s in clauses if re.search(ACT, s)) / len(clauses), 2)
+                         if clauses else 0)
     f["c1_proc"] = len(re.findall(PROC, c1))
     f["c1_step"] = 1 if re.search(r"步骤|S\d", c1) else 0
     f["c1_struct"] = len(set(re.findall(STRUCT, c1)))
@@ -191,6 +199,11 @@ def features(t: str) -> dict:
     f["param"] = len(re.findall(PARAM, desc))
     f["work"] = len(re.findall(WORK, desc))
     f["table"] = len(re.findall(r"表\s*\d+", desc))
+    f["perf_table"] = len(re.findall(
+        r"(?:测试|检测|试验|实验|性能)[^。；]{0,60}表\s*\d"
+        r"|表\s*\d[^。]{0,60}(?:测试|检测|试验|实验|性能|结果)", desc))
+    f["test_res"] = len(re.findall(TESTRES, desc))
+    f["model_claim"] = len(re.findall(MODEL, claims))
     f["mgmt"] = len(re.findall(MGMT, desc))
     f["var_def"] = len(re.findall(r"其中[，,][A-Za-z\u4e00-\u9fa5]{1,6}为", claims + desc))
     # 从权
@@ -202,7 +215,6 @@ def features(t: str) -> dict:
     f["quant_result"] = len(re.findall(QUANT_RESULT, desc))
     f["compare"] = len(re.findall(r"(?:对比例|比较例|对照组)", desc))
     f["perf"] = len(re.findall(r"(?:性能测试|检测结果|测试结果|试验结果|性能检测|表征结果)", desc))
-    f["has_data"] = bool(f["quant_result"] >= 1 or f["compare"] >= 1 or f["perf"] >= 1 or f["table"] >= 1)
     # 公式是否出现在发明内容/技术方案段
     i = min([x for x in (desc.find("发明内容"), desc.find("技术方案")) if x > 0] or [len(desc)])
     j = desc.find("具体实施方式", i)
@@ -212,6 +224,7 @@ def features(t: str) -> dict:
         j = min(len(desc), i + 8000)
     core = desc[i:j]
     f["form_core"] = len(re.findall(FORM, core))
+    f["model_core"] = len(re.findall(MODEL, core))
     f["eq_all"] = len(re.findall(r"[=＝]", desc))
     # 著录项（著录项首页可能用全角括号，统一后再匹配）
     h = hdr.replace("（", "(").replace("）", ")")
@@ -264,54 +277,54 @@ def means_judge(f: dict) -> dict:
     hits, notes = [], []
 
     broad = False
-    if f["c1_act"] >= T["act_n"] and f["c1_refs"] == 0 and f["c1_param"] < 3 \
-            and f["form"] == 0 and f["exp"] <= 1:
+    if f["c1_act_ratio"] >= T["act_ratio"] and f["c1_refs"] < 4 and f["c1_param"] < 3 \
+            and f["form_core"] == 0 and f["model_claim"] + f["model_core"] == 0:
         broad = True
-        hits.append("第八条第一项（通用动作）")
-    if f["c1_proc"] >= T["proc_n"] and f["c1_step"] and f["c1_refs"] == 0 \
-            and f["c1_param"] < 3 and f["form"] == 0:
+        hits.append("第九条第一项（通用动作）")
+    if f["c1_proc"] >= T["proc_n"] and f["c1_step"] and f["c1_param"] < 3 \
+            and f["c1_refs"] < 4 and f["c1_struct"] < 3:
         broad = True
-        hits.append("第八条第一项（工艺动作）")
-    if f["c1_unit"] >= T["unit_n"] and f["c1_refs"] < 4:
+        hits.append("第九条第二项（工艺动作）")
+    if f["c1_unit"] >= T["unit_n"] and f["model_claim"] + f["model_core"] == 0 and f["exp"] == 0:
         broad = True
-        hits.append("第八条第三项（功能性模块）")
+        hits.append("第十条（功能性模块）")
     if broad and formula:
-        hits = [h for h in hits if "第八条" not in h]
-        notes.append("第十一条：说明书在发明内容/技术方案部分给出公式，视为手段可复现")
+        hits = [h for h in hits if "第九条" not in h and "第十条" not in h]
+        notes.append("第十三条：说明书在发明内容/技术方案部分给出公式，视为手段可复现")
 
-    if f["c1_refs"] >= T["refs_stack"] and f["c1_asm"] >= T["asm_stack"] \
+    if not f["util"] and f["c1_refs"] >= T["refs_stack"] and f["c1_asm"] >= T["asm_stack"] \
             and f["c1_param"] < 3 and f["exp"] == 0:
-        hits.append("第十条（结构堆砌）")
+        hits.append("第十二条（结构堆砌）")
         notes.append(f"权1 部件 {f['c1_refs']} 个、装配关系 {f['c1_asm']} 处、无工程参数、无实施例")
 
     if f["dep_n"] >= T["dep_n"] and f["dep_parts"] >= f["dep_n"] - 1 \
             and f["dep_param"] == 0 and f["exp"] == 0 \
             and f["c1_refs"] >= T["refs_dep"] and f["c1_asm"] >= T["asm_dep"]:
-        hits.append("第九条第一项（部件罗列且从权凑数）")
+        hits.append("第十一条第一项（部件罗列且从权凑数）")
 
     if f["c1_struct"] >= 3 and f["exp"] <= T["exp_single"] and f["work"] == 0 \
             and f["param"] < T["param_few"]:
-        hits.append("第九条第二项（仅一个实施例且无工作过程）")
+        hits.append("第十一条第二项（仅一个实施例且无工作过程）")
 
     # 「管理」出现在设备名里（电池管理、热管理）不算事项型，独权有实体结构即排除本款
     if f["mgmt"] >= T["mgmt_n"] and f["var_def"] < 6 and f["form"] == 0 \
             and f["exp"] <= 1 and f["param"] < T["param_few"] \
             and f["c1_struct"] < 3 and f["c1_refs"] < 4:
-        hits.append("第十二条（技术问题不落地）")
+        hits.append("第十四条（技术问题不落地）")
 
     return {"hit": bool(hits), "clauses": hits, "notes": notes}
 
 
 def effect_judge(f: dict) -> dict:
-    """第四章：效果判据，含第七条第三项机械豁免与第四项实用新型豁免。"""
+    """第四章：效果判据，含第八条第三项机械豁免与第四项实用新型豁免。"""
     if f["util"]:
         return {"hit": False, "clauses": [], "notes": ["实用新型不适用效果判据"]}
     mech = f["c1_struct"] >= 3
     if mech and (f["c1_param"] >= 3 or f["dep_param"] >= 3):
         return {"hit": False, "clauses": [], "notes": ["机械装置类已记载工程参数，不因缺实验数据认定"]}
-    if not f["has_data"]:
-        return {"hit": True, "clauses": ["第十四条（无量化结果）"],
-                "notes": ["无数据表、无对比例、无指标数值形式的结论"]}
+    if f["perf_table"] == 0 and f["test_res"] == 0:
+        return {"hit": True, "clauses": ["第十六条（缺少验证结构）"],
+                "notes": ["无性能测试表、无测试结果数值"]}
     return {"hit": False, "clauses": [], "notes": []}
 
 
@@ -324,7 +337,7 @@ def month_index(s: str) -> int | None:
 
 
 def batch_judge(cases: list[dict], from_input: bool) -> dict:
-    """第五章：批次判据。from_input=True 表示送审文件覆盖该机构当月全部申请。"""
+    """第二层：批次判据。from_input=True 表示送审文件覆盖该机构当月全部申请。"""
     if not from_input:
         return {"state": "unevaluated",
                 "note": "送审文件不等于机构当月全量，须按 `rules/30-batch.md` 用代理机构代码查该月全部申请"}
@@ -347,27 +360,27 @@ def batch_judge(cases: list[dict], from_input: bool) -> dict:
         months = [month_index(c["app_date"]) for c in lst if month_index(c["app_date"]) is not None]
         if not months:
             continue
-        # 第十八条第一款：同一自然月
+        # 第二十条第一款：同一自然月
         for i in range(min(months), max(months) + 1):
             sub = [c for c in lst if month_index(c["app_date"]) == i]
             if len(sub) >= T["batch_n"] and len({c["applicant"] for c in sub}) >= T["batch_app"]:
-                mark(sub, "第十八条第一款：同月 {n} 件、{app} 家申请人，引用 {cite:.0%}、长背景 {bg:.0%}")
-        # 第十八条第三款：累计口径（12 个月）
+                mark(sub, "第二十条第一款：同月 {n} 件、{app} 家申请人，引用 {cite:.0%}、长背景 {bg:.0%}")
+        # 第二十条第三款：累计口径（12 个月）
         for i in range(min(months), max(months) + 2):
             sub = [c for c in lst if i <= (month_index(c["app_date"]) or -1) < i + 12]
             if len(sub) >= T["year_n"] and len({c["applicant"] for c in sub}) >= T["year_app"]:
-                mark(sub, "第十八条第三款：12 个月 {n} 件、{app} 家申请人，引用 {cite:.0%}、长背景 {bg:.0%}")
+                mark(sub, "第二十条第三款：12 个月 {n} 件、{app} 家申请人，引用 {cite:.0%}、长背景 {bg:.0%}")
     return {"state": "evaluated", "note": "以送审文件为全量口径"}
 
 
 def verdict_of(c: dict) -> tuple[str, list[str]]:
-    """第一层只判手段与效果：两项都成立即非正常，一项为存疑，两项都不成立为可提交。
+    """第一层只判手段与效果：两项都成立即非正常，一项为存疑，两项都不成立为正常。
 
     批次与主体在第二层，只对存疑案跑。实用新型不适用效果判据，第一层只判手段：
-    手段成立记存疑（进第二层等批次），不成立记可提交。
+    手段成立记存疑（进第二层等批次），不成立记正常。
     """
     hints = []
-    if c["means"]["hit"] and any(k in c["means"]["clauses"] for k in ("第十条（结构堆砌）", "第九条第一项（部件罗列且从权凑数）")):
+    if c["means"]["hit"] and any(k in c["means"]["clauses"] for k in ("第十二条（结构堆砌）", "第十一条第一项（部件罗列且从权凑数）")):
         hints.append("结构案：核对附图、装配关系与实物，确认后再定")
     if c["effect"]["hit"] and not c["means"]["hit"]:
         hints.append("仅缺验证数据：核对是否属于机械结构无参数的情形")
@@ -376,7 +389,7 @@ def verdict_of(c: dict) -> tuple[str, list[str]]:
         return "非正常", hints
     if n == 1:
         return "存疑", hints
-    return "可提交", hints
+    return "正常", hints
 
 
 def collect(paths: list[str]) -> list[str]:
@@ -418,7 +431,7 @@ def main() -> int:
 
     batch_judge(cases, args.batch_from_input)
 
-    summary = {"非正常": 0, "存疑": 0, "可提交": 0}
+    summary = {"非正常": 0, "存疑": 0, "正常": 0}
     rows = []
     for c in cases:
         v, hints = verdict_of(c)
