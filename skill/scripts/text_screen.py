@@ -320,9 +320,12 @@ def effect_judge(f: dict) -> dict:
     mech = f["c1_struct"] >= 3
     if mech and (f["c1_param"] >= 3 or f["dep_param"] >= 3):
         return {"hit": False, "clauses": [], "notes": ["机械装置类已记载工程参数，不因缺实验数据认定"]}
-    # 背景技术引用了在先文献 = 申请人做过检索比对，与验证结构等价看待（实测精确率优于参数护栏）
-    if f["bg_cite"] > 0 or f["perf_table"] > 0 or f["test_res"] > 0:
-        return {"hit": False, "clauses": [], "notes": ["有验证结构：引用在先文献/性能测试表/测试结果数值"]}
+    # 性能表/测试数值 = 确有验证，放行；仅"引用在先文献"证据弱，降为存疑而非放行
+    if f["perf_table"] > 0 or f["test_res"] > 0:
+        return {"hit": False, "clauses": [], "notes": ["有验证结构：性能测试表或测试结果数值"]}
+    if f["bg_cite"] > 0:
+        return {"hit": False, "guarded": True, "clauses": ["第十六条（仅引用在先文献）"],
+                "notes": ["背景技术引用了在先文献，但无性能表、无测试数值：证据不足，记存疑"]}
     return {"hit": True, "clauses": ["第十六条（缺少验证结构）"],
             "notes": ["无引用文献、无性能测试表、无测试结果数值"]}
 
@@ -391,12 +394,16 @@ def verdict_of(c: dict) -> tuple[str, list[str]]:
         return "非正常", hints
     if soft and effect:
         return "非正常", hints
+    if c["effect"].get("guarded"):
+        return "存疑", ["仅引用在先文献、无验证数据：交主体步"]
     if soft or effect:
         if effect and not soft:
             hints.append("仅缺验证数据：核对是否属于机械结构无参数的情形")
         return "存疑", hints
     if c.get("util"):
         return "存疑", ["实用新型无手段命中：按标准列存疑，交主体步"]
+    if c.get("batch", {}).get("state") != "hit":
+        hints.append("批次未命中该机构：结论须跑 T23/T25/T26 后才能落正常")
     return "正常", hints
 
 
