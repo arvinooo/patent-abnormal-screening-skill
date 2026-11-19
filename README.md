@@ -15,34 +15,36 @@
 
 ```
 skill/                     ← 就是正在用的那个 skill 目录，可以原样拷回去
-├── SKILL.md               主文件：两层流程、铁律、档位与对外表述、报告要求
+├── SKILL.md               入口：两阶段流程、目录导航、执行顺序、边界
 ├── AGENTS.md              维护规则（正文写法、判据口径、同步流程）
-├── rules/
-│   ├── 00-thresholds.md       阈值总表（唯一出口，改阈值只改这里）
-│   ├── 10-means.md            手段判据（第九条~第十五条）
-│   ├── 20-effect.md           效果判据（第十六条~第十九条）+ 机械/实用新型豁免
-│   ├── 30-batch.md            第二层：批次与署名（第二十条、第二十一条）与取数口径
-│   ├── 40-inventor.md         第二层：发明人件数（含剔重名）
-│   ├── 50-cross-org.md        第二层：跨机构聚组
-│   ├── 60-subject.md          第二层：①类型/科技属性/社保/主营匹配/授权发明专利
-│   ├── 65-agency.md           第二层：代理师代理量
-│   └── 90-exemptions.md       专精特新豁免
-├── docs/
-│   └── 非正常判定标准.md   判定条文（七章二十八条）
-├── data-sources.md        怎么取数：字段码、检索式、缓存
-├── cases.md               标定数据与判例
-└── scripts/
-    ├── text_screen.py     第一层：手段与效果打分，输出三档（不取数）
-    ├── build_report.py    结果 JSON 转三表报告
-    ├── extract_pdf.py     公开文本 PDF → 著录项/权1/技术领域（带缓存）
-    ├── cache.py           外部数据缓存读写（company / inventor / agent_month）
-    ├── inco_login.py      incoPat 登录与凭据
-    ├── inco_client.py     incoPat 浏览器客户端
-    ├── inco_inventor.py   发明人记录检索
-    ├── xys_agent.py       香橼树代理师月度代理量
-    └── bsk_helper.py      浏览器操作辅助
+├── 非正常判定标准.md       第一阶段判据全文（七章二十八条），判前通读
+├── thresholds.md          阈值唯一出口：T01–T16 / B01–B02 / T20–T27
+├── stage1-text/
+│   └── procedure.md       第一阶段作业规程：抽取、计数、判定单、常见坑
+├── stage2-subject/
+│   ├── S0-batch.md        批次与署名（B01 代理机构批量代写、B02 署名异常）
+│   ├── S1-inventor.md     T20 发明人有效件数（含剔重名）
+│   ├── S2-cross-org.md    T21 跨机构聚组
+│   ├── S3-agency.md       T22 代理师代理量
+│   ├── S4-granted.md      T23 授权发明专利
+│   ├── S5-applicant.md    T24–T27 类型/科技属性/社保/主营匹配
+│   ├── S6-records.md      研发过程记录（补充核查）
+│   └── S7-exemptions.md   专精特新豁免
+├── references/
+│   ├── data-sources.md    怎么取数：字段码、检索式、缓存
+│   └── cases.md           标定数据与判例
+└── scripts/               抽取、文本初筛、取数、报告
+    ├── text_screen.py
+    ├── build_report.py
+    ├── extract_pdf.py
+    ├── cache.py
+    ├── inco_login.py
+    ├── inco_client.py
+    ├── inco_inventor.py
+    ├── xys_agent.py
+    └── bsk_helper.py
 
-docs/                      ← 仓库根，与 skill/docs/ 同一份
+docs/                      ← 仓库根，与 skill/非正常判定标准.md 同一份（匿名版）
 └── 非正常判定标准.md      判定条文（七章二十八条，面向律师与审核人员）
 ```
 
@@ -63,7 +65,7 @@ python3 scripts/text_screen.py <目录> --batch-from-input   # 第二层批次�
 
 输出每案一行 JSON：`means` / `effect` / `batch` / `verdict` / `hints`，最后一行为汇总。`verdict` 为「非正常 / 存疑 / 正常」，只有存疑进第二层。
 
-需要给律师一份可读标准、或人工复核时，用 `docs/非正常判定标准.md`；它与 `skill/rules/` 的口径一致。
+需要给律师一份可读标准、或人工复核时，用 `docs/非正常判定标准.md`；它与 `skill/非正常判定标准.md` 同一份，仅把公开号与申请人替换为匿名表述。
 
 依赖：Python 3.10+，`pypdf`（缺失时回退 `pdfplumber`）；外部取数需 `bsk`（浏览器）与 `qcc`（企查查 CLI）。
 
@@ -94,8 +96,9 @@ git checkout <commit> -- skill/
 | v3.2 | 2026-11-18 | 第一层出三档，可提交直接判正常；主体口径照原 skill：①社保只作辅助证据、自然人需叠加第一层命中 |
 | v3.3 | 2026-11-18 | 标准重排为三十一条，删企业跨领域集中条；第二层全不成立判正常；技术领域/撰写/多件相似/违法公德移出流程；手段与效果阈值按 182/85/23 样本重标 |
 | v3.4 | 2026-11-19 | 主体核查整章移出判定标准，由第二层 `rules/60-subject.md` 承担；标准缩为七章二十八条 |
+| v3.5 | 2026-11-19 | 目录按阶段重排：`stage1-text/`、`stage2-subject/`（S0–S7）、`references/`；批次压为 B01、B02 两条，只留 12 个月口径；标准升为 452 行版（三档分流 + 放行条件） |
 
 ## 两条硬约束
 
-- **阈值只写在 `skill/rules/00-thresholds.md`**：改判据先改那张表，`scripts/text_screen.py` 的常量与之同步。
+- **阈值只写在 `skill/thresholds.md`**：改判据先改那张表，`scripts/text_screen.py` 的常量与之同步。
 - **发明人计数必须先剔重名**：按姓名检索会把同名他人算进来（`王猛` 窗口内可命中上万组），计数只认共同发明人锚定的记录；常见名判为存疑。

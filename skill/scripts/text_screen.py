@@ -15,7 +15,7 @@
     verdict 非正常 | 存疑 | 正常
     hints   复核提示（结构案/仅缺验证数据，需人工看附图）
 
-判据编号与 `rules/00-thresholds.md` 对应；改阈值改那里，本文件同步改常量。
+判据编号与 `thresholds.md` 对应；改阈值改那里，本文件同步改常量。
 依赖: pypdf（缺失时回退 pdfplumber）
 """
 from __future__ import annotations
@@ -27,7 +27,7 @@ import os
 import re
 import sys
 
-# ---------------------------------------------------------------- 常量（对齐 rules/00-thresholds.md）
+# ---------------------------------------------------------------- 常量（对齐 thresholds.md）
 T = {
     "refs_stack": 12,      # 第十二条 结构堆砌：权1 部件数（仅发明）
     "asm_stack": 5,        # 第十二条 结构堆砌：装配关系处数
@@ -340,7 +340,7 @@ def batch_judge(cases: list[dict], from_input: bool) -> dict:
     """第二层：批次判据。from_input=True 表示送审文件覆盖该机构当月全部申请。"""
     if not from_input:
         return {"state": "unevaluated",
-                "note": "送审文件不等于机构当月全量，须按 `rules/30-batch.md` 用代理机构代码查该月全部申请"}
+                "note": "送审文件不等于机构当月全量，须按 `stage2-subject/S0-batch.md` 用代理机构代码查该月全部申请"}
     groups: dict = {}
     for c in cases:
         if not c["agency"] or not c["app_date"]:

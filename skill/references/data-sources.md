@@ -384,3 +384,8 @@ qcc operation get_honor_info "<申请人全名>" --json
 | `xys_month` | `姓名\|年` | 香橼树整年分月表：months / total / month_sum | 30 天 |
 | `agent_month` | `姓名\|窗口锚点` | 滚动 12 个月：value / window / months / ytd_2026 / _schema=2 | 1 天 |
 | `pdf` / `docx` | 文件名 | 提取字段 + 全文 | 永久 |
+
+## 第二阶段数据来源速查
+
+- 工商四项（类型/科技属性/社保/主营）：企查查 `get_company_registration_info`，缓存 90 天，键 = 申请人全名
+- 1e 授权发明：incoPat 指令检索（浏览器，无接口费用），缓存 90 天，键 = 申请人全名
