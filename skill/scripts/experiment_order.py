@@ -54,6 +54,15 @@ def load(patterns: list[str]) -> list[dict]:
     return rows
 
 
+def eff_raw(f: dict) -> bool:
+    """第十六条的原始成立条件（不含护栏），扫护栏时用；判案请用 text_screen.effect_judge。"""
+    if f["util"]:
+        return False
+    if f["c1_struct"] >= 3 and (f["c1_param"] >= 3 or f["dep_param"] >= 3):
+        return False
+    return f["perf_table"] == 0 and f["test_res"] == 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--pos", nargs="+", required=True)
@@ -77,14 +86,14 @@ def main() -> int:
         print(f"{name:26s} 召回 {tp}/{len(pos)}={tp / max(1, len(pos)):.0%}  "
               f"误伤 {fp}/{len(neg)}={fp / max(1, len(neg)):.0%}  精确 {tp / max(1, tp + fp):.0%}")
 
-    rate("手段或效果", lambda f: TS.means_judge(f)["hit"] or TS.effect_judge(f)["hit"])
+    rate("手段或效果（原始条件）", lambda f: TS.means_judge(f)["hit"] or eff_raw(f))
     rate("仅手段", lambda f: TS.means_judge(f)["hit"])
-    rate("仅效果", lambda f: TS.effect_judge(f)["hit"])
+    rate("仅效果（原始条件）", eff_raw)
 
     import collections
     cl = collections.Counter()
     for r in pos + neg:
-        for c in TS.means_judge(r["f"])["clauses"] + TS.effect_judge(r["f"])["clauses"]:
+        for c in TS.means_judge(r["f"])["clauses"] + (["第十六条（缺少验证结构）"] if eff_raw(r["f"]) else []):
             cl[(c, r in neg)] += 1
     for (c, is_neg), n in sorted(cl.items(), key=lambda x: -x[1]):
         if not is_neg:
@@ -135,6 +144,7 @@ def main() -> int:
           f"可疑申请人 {len({r['app'] for r in sus if r['app']})}")
 
     print("\n=== 调参：效果护栏")
+
     def guard(f: dict, mode: str) -> bool:
         e2, p25 = f["exp"] >= 2, f["param"] >= 25
         perf = f["perf_table"] > 0 or f["test_res"] > 0
@@ -150,7 +160,7 @@ def main() -> int:
     for mode in ("无", "引用", "引用或量化结果", "实施例2且参数25", "现放行", "引用或现放行"):
         rate(f"效果护栏：{mode}",
              lambda f, m=mode: TS.means_judge(f)["hit"] or
-             (TS.effect_judge(f)["hit"] and not guard(f, m)))
+             (eff_raw(f) and not guard(f, m)))
 
     print("\n=== 调参：硬判条款集（其余需与效果双证据）")
     all_means = ("第十二条", "第十条", "第九条第一项", "第十一条第一项")
@@ -161,9 +171,23 @@ def main() -> int:
             cl = TS.means_judge(f)["clauses"]
             is_hard = any(any(x in c for x in H) for c in cl)
             soft = bool(cl) and not is_hard
-            return is_hard or (soft and TS.effect_judge(f)["hit"] and not guard(f, "引用"))
+            return is_hard or (soft and eff_raw(f) and not guard(f, "引用"))
 
         rate(f"硬判：{'/'.join(hard)}", judge)
+
+    print("\n=== 三档结论（text_screen.verdict_of，批次按样内命中机构置 hit）")
+    def verdict(r: dict) -> str:
+        state = "hit" if r["ag"] in hit else "unevaluated"
+        v, _ = TS.verdict_of({"means": TS.means_judge(r["f"]),
+                              "effect": TS.effect_judge(r["f"]),
+                              "batch": {"state": state}})
+        return v
+
+    for scope, rows in (("全语料", pos + neg), ("批次外", [r for r in pos + neg if r["ag"] not in hit])):
+        g = collections.Counter((verdict(r), "正" if r in pos else "反") for r in rows)
+        line = "  ".join(f"{v} {g[(v, '正')]}正/{g[(v, '反')]}反" for v in ("非正常", "存疑", "正常"))
+        tp, fp = g[("非正常", "正")], g[("非正常", "反")]
+        print(f"{scope} {len(rows):3d} 件：{line}  精确 {tp / max(1, tp + fp):.0%}")
     return 0
 
 

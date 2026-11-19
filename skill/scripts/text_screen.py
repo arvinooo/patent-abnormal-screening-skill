@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""第 1 层：专利公开文本的两项判据筛查（手段、效果；只看文件本身，不取外部数据）。
+"""文本步：专利公开文本的判据筛查（手段、效果；只看文件本身，不取外部数据）。
 
 用法:
     python3 scripts/text_screen.py <目录或 PDF/文本 列表...> [--json out.json] [--batch-from-input]
@@ -11,8 +11,8 @@
     pub / applicant / agency / app_date / title
     means   {"hit": bool, "clauses": [...], "notes": [...]}
     effect  {"hit": bool, "clauses": [...], "notes": [...]}
-    batch   {"state": "hit|miss|unevaluated", "note": str}   仅供第二层参考，不参与本层结论
-    verdict 非正常 | 存疑 | 正常
+    batch   {"state": "hit|miss|unevaluated", "note": str}   命中即直接定非正常（批次先于文本）
+    verdict 非正常 | 存疑 | 正常   硬证据单判、软证据须与第十六条同时成立（见 thresholds.md）
     hints   复核提示（结构案/仅缺验证数据，需人工看附图）
 
 判据编号与 `thresholds.md` 对应；改阈值改那里，本文件同步改常量。
@@ -316,16 +316,17 @@ def means_judge(f: dict) -> dict:
 
 
 def effect_judge(f: dict) -> dict:
-    """第四章：效果判据，含第八条第三项机械豁免与第四项实用新型豁免。"""
+    """第四章：效果判据。放行条件见 thresholds.md T11：引用在先文献、有表、有数、机械参数、实用新型。"""
     if f["util"]:
         return {"hit": False, "clauses": [], "notes": ["实用新型不适用效果判据"]}
     mech = f["c1_struct"] >= 3
     if mech and (f["c1_param"] >= 3 or f["dep_param"] >= 3):
         return {"hit": False, "clauses": [], "notes": ["机械装置类已记载工程参数，不因缺实验数据认定"]}
-    if f["perf_table"] == 0 and f["test_res"] == 0:
-        return {"hit": True, "clauses": ["第十六条（缺少验证结构）"],
-                "notes": ["无性能测试表、无测试结果数值"]}
-    return {"hit": False, "clauses": [], "notes": []}
+    # 背景技术引用了在先文献 = 申请人做过检索比对，与验证结构等价看待（实测精确率优于参数护栏）
+    if f["bg_cite"] > 0 or f["perf_table"] > 0 or f["test_res"] > 0:
+        return {"hit": False, "clauses": [], "notes": ["有验证结构：引用在先文献/性能测试表/测试结果数值"]}
+    return {"hit": True, "clauses": ["第十六条（缺少验证结构）"],
+            "notes": ["无引用文献、无性能测试表、无测试结果数值"]}
 
 
 def month_index(s: str) -> int | None:
@@ -373,21 +374,33 @@ def batch_judge(cases: list[dict], from_input: bool) -> dict:
     return {"state": "evaluated", "note": "以送审文件为全量口径"}
 
 
-def verdict_of(c: dict) -> tuple[str, list[str]]:
-    """第一层只判手段与效果：两项都成立即非正常，一项为存疑，两项都不成立为正常。
+HARD_CLAUSES = ("第十二条（结构堆砌）", "第十条（功能性模块）")
 
-    批次与主体在第二层，只对存疑案跑。实用新型不适用效果判据，第一层只判手段：
-    手段成立记存疑（进第二层等批次），不成立记正常。
+
+def verdict_of(c: dict) -> tuple[str, list[str]]:
+    """文本三档：非正常 / 存疑 / 正常。批次命中优先，直接定非正常。
+
+    硬证据（第十二条、第十条）单独成立即非正常；其余手段条款属软证据，须与第十六条同时成立。
+    单一软证据或单一缺验证只记存疑，交第二阶段用主体事实判决。
+    实测见 references/ordering.md §9：硬判只留这两条，精确 85%。
     """
     hints = []
-    if c["means"]["hit"] and any(k in c["means"]["clauses"] for k in ("第十二条（结构堆砌）", "第十一条第一项（部件罗列且从权凑数）")):
-        hints.append("结构案：核对附图、装配关系与实物，确认后再定")
-    if c["effect"]["hit"] and not c["means"]["hit"]:
-        hints.append("仅缺验证数据：核对是否属于机械结构无参数的情形")
-    n = int(c["means"]["hit"]) + int(c["effect"]["hit"])
-    if n >= 2:
+    hits = c["means"]["clauses"]
+    hard = any(k in h for k in HARD_CLAUSES for h in hits)
+    soft = bool(hits) and not hard
+    effect = c["effect"]["hit"]
+
+    if c.get("batch", {}).get("state") == "hit":
+        return "非正常", ["批次判据成立"]
+    if hard:
+        if any("第十二条" in h for h in hits):
+            hints.append("结构案：核对附图、装配关系与实物，确认后再定")
         return "非正常", hints
-    if n == 1:
+    if soft and effect:
+        return "非正常", hints
+    if soft or effect:
+        if effect and not soft:
+            hints.append("仅缺验证数据：核对是否属于机械结构无参数的情形")
         return "存疑", hints
     return "正常", hints
 
