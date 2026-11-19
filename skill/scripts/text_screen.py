@@ -5,7 +5,7 @@
     python3 scripts/text_screen.py <目录或 PDF/文本 列表...> [--json out.json] [--batch-from-input]
     python3 scripts/text_screen.py 测试用例/某批 --json 结果.json
     python3 scripts/text_screen.py a.pdf b.pdf
-    python3 scripts/text_screen.py 某批 --batch-from-input   # 第二层批次用；送审文件覆盖机构当月全部时
+    python3 scripts/text_screen.py 某批 --batch-from-input   # 批次用；送审文件覆盖机构 12 个月全部申请时
 
 输出（stdout，一行一案的 JSON，最后一行是汇总）:
     pub / applicant / agency / app_date / title
@@ -40,12 +40,10 @@ T = {
     "exp_single": 1,       # 第十一条第二项：说明书仅一个实施例
     "param_few": 5,        # 第十一条第二项：说明书参数少于 5 处
     "mgmt_n": 8,           # 第十四条：事项型词频
-    "batch_n": 10,         # 第二十条第一款：同月件数
-    "batch_app": 6,        # 第二十条第一款：同月申请人数
     "cite_ratio": 0.20,    # 第二十条：引用在先文献比例上限
     "bg_ratio": 0.50,      # 第二十条：背景技术达 400 字比例上限
-    "year_n": 30,          # 第二十条第三款：12 个月件数
-    "year_app": 15,        # 第二十条第三款：12 个月申请人数
+    "year_n": 30,          # 第二十条：12 个月件数
+    "year_app": 15,        # 第二十条：12 个月申请人数
 }
 
 MODEL = (r"(?:CNN|LSTM|GRU|U-?Net|YOLO|Transformer|BERT|ResNet|GAN|卷积|神经网络|注意力|"
@@ -338,7 +336,7 @@ def month_index(s: str) -> int | None:
 
 
 def batch_judge(cases: list[dict], from_input: bool) -> dict:
-    """第二层：批次判据。from_input=True 表示送审文件覆盖该机构当月全部申请。"""
+    """批次判据。from_input=True 表示送审文件覆盖该机构 12 个月全部申请。"""
     if not from_input:
         return {"state": "unevaluated",
                 "note": "送审文件不等于机构当月全量，须按 `stage2-subject/S0-batch.md` 用代理机构代码查该月全部申请"}
@@ -361,16 +359,11 @@ def batch_judge(cases: list[dict], from_input: bool) -> dict:
         months = [month_index(c["app_date"]) for c in lst if month_index(c["app_date"]) is not None]
         if not months:
             continue
-        # 第二十条第一款：同一自然月
-        for i in range(min(months), max(months) + 1):
-            sub = [c for c in lst if month_index(c["app_date"]) == i]
-            if len(sub) >= T["batch_n"] and len({c["applicant"] for c in sub}) >= T["batch_app"]:
-                mark(sub, "第二十条第一款：同月 {n} 件、{app} 家申请人，引用 {cite:.0%}、长背景 {bg:.0%}")
-        # 第二十条第三款：累计口径（12 个月）
+        # 第二十条：12 个月累计口径
         for i in range(min(months), max(months) + 2):
             sub = [c for c in lst if i <= (month_index(c["app_date"]) or -1) < i + 12]
             if len(sub) >= T["year_n"] and len({c["applicant"] for c in sub}) >= T["year_app"]:
-                mark(sub, "第二十条第三款：12 个月 {n} 件、{app} 家申请人，引用 {cite:.0%}、长背景 {bg:.0%}")
+                mark(sub, "第二十条：12 个月 {n} 件、{app} 家申请人，引用 {cite:.0%}、长背景 {bg:.0%}")
     return {"state": "evaluated", "note": "以送审文件为全量口径"}
 
 
@@ -381,7 +374,7 @@ def verdict_of(c: dict) -> tuple[str, list[str]]:
     """文本三档：非正常 / 存疑 / 正常。批次命中优先，直接定非正常。
 
     硬证据（第十二条、第十条）单独成立即非正常；其余手段条款属软证据，须与第十六条同时成立。
-    单一软证据或单一缺验证只记存疑，交第二阶段用主体事实判决。
+    单一软证据或单一缺验证只记存疑，交主体步用主体事实判决。
     实测见 references/ordering.md §9：硬判只留这两条，精确 85%。
     """
     hints = []
@@ -402,6 +395,8 @@ def verdict_of(c: dict) -> tuple[str, list[str]]:
         if effect and not soft:
             hints.append("仅缺验证数据：核对是否属于机械结构无参数的情形")
         return "存疑", hints
+    if c.get("util"):
+        return "存疑", ["实用新型无手段命中：按标准列存疑，交主体步"]
     return "正常", hints
 
 
@@ -456,7 +451,7 @@ def main() -> int:
             "means": c["means"], "effect": c["effect"],
             "batch": {"state": "hit", "note": c.get("_batch", "")} if c.get("_batch") else
                      {"state": "miss" if args.batch_from_input else "unevaluated",
-                      "note": "" if args.batch_from_input else "需查机构当月全量"},
+                      "note": "" if args.batch_from_input else "需查机构 12 个月全量"},
             "verdict": v, "hints": hints,
         }
         rows.append(row)

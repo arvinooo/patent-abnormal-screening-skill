@@ -30,7 +30,7 @@ SHORT = {
 
 
 def short_reason(case: dict) -> str:
-    # 逐案 JSON 已给出结论句式时优先用它（第二层结论、人工复核结论都在这里）
+    # 逐案 JSON 已给出结论句式时优先用它（脚本结论、人工复核结论都在这里）
     if case.get("reason"):
         return case["reason"]
     parts = []

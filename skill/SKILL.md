@@ -29,10 +29,9 @@ description: Use when the user supplies Chinese patent application text (PDF 公
 | 路径 | 内容 |
 |---|---|
 | `非正常判定标准.md` | 文本判据全文，判前通读；条款号以它为准 |
-| `dimensions.md` | 23 维平铺：方向（判硬/判软/筛/救）、成本、实测 |
 | `stage1-text/procedure.md` | 怎么抽取、怎么计数、判定单字段、常见坑 |
 | `references/ordering.md` | 排序与调参实验：为什么这么排、精确率怎么来的 |
-| `thresholds.md` | 阈值唯一出口：T01–T16、B01–B02、T20–T27 |
+| `thresholds.md` | 唯一出口：23 个维度的阈值、方向（判硬/判软/筛/救）、去重成本、实测、脚本常量 |
 | `stage2-subject/S0-batch.md` | 批次与署名（B01、B02） |
 | `stage2-subject/S1-inventor.md` | T20 发明人有效件数 |
 | `stage2-subject/S2-cross-org.md` | T21 跨机构组数 |
