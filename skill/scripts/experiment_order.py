@@ -133,6 +133,37 @@ def main() -> int:
           f"申请人 {len({r['app'] for r in tail if r['app']})}）："
           f"文本可疑 {len(sus)}（正例 {tp}，精确 {tp / max(1, len(sus)):.0%}），"
           f"可疑申请人 {len({r['app'] for r in sus if r['app']})}")
+
+    print("\n=== 调参：效果护栏")
+    def guard(f: dict, mode: str) -> bool:
+        e2, p25 = f["exp"] >= 2, f["param"] >= 25
+        perf = f["perf_table"] > 0 or f["test_res"] > 0
+        return {
+            "无": False,
+            "引用": f["bg_cite"] > 0,
+            "引用或量化结果": f["bg_cite"] > 0 or f["quant_result"] > 0,
+            "实施例2且参数25": e2 and p25,
+            "现放行": e2 and (perf or p25),
+            "引用或现放行": f["bg_cite"] > 0 or (e2 and (perf or p25)),
+        }[mode]
+
+    for mode in ("无", "引用", "引用或量化结果", "实施例2且参数25", "现放行", "引用或现放行"):
+        rate(f"效果护栏：{mode}",
+             lambda f, m=mode: TS.means_judge(f)["hit"] or
+             (TS.effect_judge(f)["hit"] and not guard(f, m)))
+
+    print("\n=== 调参：硬判条款集（其余需与效果双证据）")
+    all_means = ("第十二条", "第十条", "第九条第一项", "第十一条第一项")
+    for k in (2, 3, 4):
+        hard = all_means[:k]
+
+        def judge(f: dict, H=hard) -> bool:
+            cl = TS.means_judge(f)["clauses"]
+            is_hard = any(any(x in c for x in H) for c in cl)
+            soft = bool(cl) and not is_hard
+            return is_hard or (soft and TS.effect_judge(f)["hit"] and not guard(f, "引用"))
+
+        rate(f"硬判：{'/'.join(hard)}", judge)
     return 0
 
 
