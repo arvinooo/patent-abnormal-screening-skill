@@ -30,7 +30,7 @@ description: Use when the user supplies Chinese patent application text (PDF 公
 |---|---|
 | `非正常判定标准.md` | 文本判据全文，判前通读；条款号以它为准 |
 | `stage1-text/procedure.md` | 怎么抽取、怎么计数、判定单字段、常见坑 |
-| `references/ordering.md` | 排序与调参实验：为什么这么排、精确率怎么来的 |
+| `references/ordering.md` | 排序与调参依据：为什么这么排、精确率怎么来的、怎么复现 |
 | `thresholds.md` | 唯一出口：23 个维度的阈值、方向（判硬/判软/筛/救）、去重成本、实测、脚本常量 |
 | `stage2-subject/S0-batch.md` | 批次与署名（B01、B02） |
 | `stage2-subject/S1-inventor.md` | T20 发明人有效件数 |
@@ -41,7 +41,6 @@ description: Use when the user supplies Chinese patent application text (PDF 公
 | `stage2-subject/S6-records.md` | 研发过程记录（补充核查） |
 | `stage2-subject/S7-exemptions.md` | 专精特新豁免 |
 | `references/data-sources.md` | 缓存协议、数据源、凭据、检索字段 |
-| `references/cases.md` | 案件记录与批次快照结构 |
 | `scripts/` | 抽取、文本初筛、机构/发明人取数、报告生成 |
 
 ## 三、步骤与成本

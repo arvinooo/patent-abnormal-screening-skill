@@ -1,7 +1,7 @@
 # 阈值总表（唯一出口）
 
 > 改阈值只改这里。`scripts/` 里的常量、各模块文档一律引用本表，不重复写数字。
-> 每批的阈值快照写进 `references/cases.md` 的 `_batch.json` 的 `rules_version`；报告正文不印快照。
+> 每批的阈值快照写进批次的 `_batch.json` 的 `rules_version`；报告正文不印快照。
 
 ## 结论规则
 

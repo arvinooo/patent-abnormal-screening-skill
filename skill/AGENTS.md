@@ -21,7 +21,7 @@
 ## 三、阈值与代码
 
 - 阈值只写在 `thresholds.md`；`scripts/text_screen.py` 的常量与之一一对应，改一处必须改另一处。
-- 改判据要同步三处：各模块文档的文字、`scripts/text_screen.py` 的实现、`cases.md` 的标定数据。
+- 改判据要同步三处：`thresholds.md` 的阈值、`scripts/text_screen.py` 的实现、`非正常判定标准.md` 的条文；改完跑 `scripts/experiment_order.py` 复核精确率。
 - 报告格式由 `scripts/build_report.py` 决定，改格式改脚本，不靠手写。
 
 ## 四、改完做什么
