@@ -69,7 +69,11 @@ def session(create: bool = True) -> str:
             return sid
     if not create:
         return ""
-    d = _bsk("session", "start", "--json")
+    args = ["session", "start", "--json"]
+    browser = os.environ.get("BSK_BROWSER") or os.environ.get("INCO_BROWSER")
+    if browser:                       # 指定浏览器实例：Edge 卡住时切 Chrome
+        args += ["--browser", browser]
+    d = _bsk(*args)
     sid = d.get("session_id") or ""
     if not sid:
         raise IncoError("无法开启浏览器会话：%s" % d)
