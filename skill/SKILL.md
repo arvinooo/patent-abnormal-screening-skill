@@ -1,6 +1,6 @@
 ---
 name: patent-abnormal-screening
-description: Use when the user supplies Chinese patent application text (PDF 公开文本 or Word 正文) and asks whether it is 非正常申请 (abnormal filing) under CNIPA Order No.77 — 判断"正常/非正常""非正常申请""77号令筛查"时。顺序：先查这批案子是不是代写机构批量产出的（批次），再读 PDF 正文判撰写质量（文本），最后只对存疑案查申请人/发明人的主体事实（主体）。
+description: Use when the user supplies Chinese patent application text (PDF 公开文本 or Word 正文) and asks whether it is 非正常申请 (abnormal filing) under CNIPA Order No.77 — 判断"正常/非正常""非正常申请""77号令筛查"时。顺序：先读 PDF 正文判撰写质量（文本，0 成本），再只对存疑案查申请人/发明人的主体事实（主体，要调平台）。
 ---
 
 # 专利非正常申请筛查
@@ -9,15 +9,14 @@ description: Use when the user supplies Chinese patent application text (PDF 公
 
 一句话：**这件专利是为了保护技术，还是为了凑数。**
 
-凑数的案子有三个共同点，逐个查：
+凑数的案子有两个共同点，逐个查：
 
 | 线索 | 大白话 | 怎么看 |
 |---|---|---|
-| 批次 | 是不是一家代写机构一个月内赶出来的一批 | 一条机构检索式，看件数、家数、引用率、背景篇幅 |
 | 文本 | 这件案子写没写出"怎么做、凭什么有效" | 读权 1 和说明书，看有没有具体手段和验证数据 |
 | 主体 | 申请人、发明人像不像真在做这件事 | 查工商、查授权发明、查发明人名下件数 |
 
-先查批次（一次查询管一整批），再读文本（0 成本，但只够出"存疑"），最后才查主体（最贵，只查存疑的）。
+先读文本（0 成本，但只够出"存疑"），再查主体（最贵，只查存疑的）。
 
 ## 二、一件案子走一遍
 
@@ -25,11 +24,7 @@ description: Use when the user supplies Chinese patent application text (PDF 公
 
 **① 读首页**——代理机构「北京云嘉湃富」，申请日 2025.08.14，发明申请。
 
-**② 批次**：`AGC=(北京云嘉湃富知识产权代理有限公司) AND AD=[2024.08.14 TO 2025.08.14]`
-查到 145 件、67 家申请人、引用在先文献 26%、背景技术够 400 字的占 55%。
-门槛是「≥30 件、≥15 家、引用 <20%、长背景 <50%」——后两条不达标，**批次不命中**。
-
-**③ 文本**：数出来了这些
+**② 文本**：数出来了这些
 
 | 数什么 | 值 | 说明 |
 |---|---|---|
@@ -42,7 +37,7 @@ description: Use when the user supplies Chinese patent application text (PDF 公
 
 对照条款：第十条（功能性模块 ≥3 处且无模型、无实施例）**成立**；第十六条（无引用、无表、无数）**成立**。
 
-**④ 结论**：第十条是硬证据，单独成立就定案 → **非正常**，不必再查主体。
+**③ 结论**：第十条是硬证据，单独成立就定案 → **非正常**，不必再查主体。
 
 **对照案例**：`CN118852128A 含2-吲哚酮的喹唑啉衍生物`，有 9 个实施例、2 张性能测试表、66 处带单位参数 → 第十六条豁免，文本判正常。查到社保 0 人（该公司 2020 年成立）→ 只有 1 项主体事实、文本又没命中 → 记**存疑**，人工看一眼社保是不是年报没报。
 
@@ -50,13 +45,12 @@ description: Use when the user supplies Chinese patent application text (PDF 公
 
 | 情形 | 结论 | 下一步 |
 |---|---|---|
-| 批次命中 | 非正常 | 整批结束 |
 | 第十二条或第十条单独成立 | 非正常 | 结束 |
 | 其他手段条款 + 第十六条同时成立 | 非正常 | 结束 |
 | 只有一个手段条款，或只有第十六条 | 存疑 | 查主体 |
 | 主体 ≥2 项成立，或 1 项成立且文本有命中 | 非正常 | 结束 |
 | 主体 1 项成立、文本无命中 | 存疑 | 人工复核 |
-| 全部不命中 | 正常 | 批次没命中的机构，要跑完 T23/T25/T26 才算 |
+| 全部不命中 | 正常 | 要跑完 T23/T25/T26 才算 |
 | 数据拿不到 | 待核 | 不猜 |
 
 硬证据只有两条：**第十二条**（结构堆砌：部件 ≥12、装配 ≥5、无参数、无实施例）、**第十条**（功能性模块 ≥3 处）。其余手段条款都要配上第十六条才算数——它们单独命中时，十个里有一两个是正常案件。
@@ -67,7 +61,6 @@ description: Use when the user supplies Chinese patent application text (PDF 公
 
 | 查什么 | 平台 | 成本 |
 |---|---|---|
-| 机构 12 个月件数与申请人 | incoPat 指令检索 | 每机构 1 条 |
 | 授权发明专利件数 | incoPat | 每申请人 1 次，约 75 秒 |
 | 社保、经营范围、行业 | 企查查 `qcc company get_company_registration_info` | 每申请人 1 次，约 1 秒 |
 | 代理师 12 个月代理量 | 香橼树代理师月度统计 | 每人 1 次 |
@@ -88,7 +81,7 @@ python3 scripts/build_report.py 结果.json -o 报告.md --title 批次名
 python3 scripts/experiment_order.py --pos <非正常样本目录> --neg <正常样本目录>
 ```
 
-批次与主体要调平台，命令见 `references/data-sources.md`；缓存 90 天，查过的别重查。
+主体要调平台，命令见 `references/data-sources.md`；缓存 90 天，查过的别重查。
 
 ## 六、什么时候不适用
 
@@ -104,7 +97,6 @@ python3 scripts/experiment_order.py --pos <非正常样本目录> --neg <正常�
 | 每条判据的原文和边界（判案时对照） | `非正常判定标准.md` |
 | 所有阈值、方向、成本、实测命中 | `thresholds.md` |
 | 怎么从 PDF 里数出部件数、实施例数、参数处数 | `stage1-text/procedure.md` |
-| 批次怎么查、四项门槛为什么不能减 | `stage2-subject/S0-batch.md` |
 | 发明人件数、跨机构、代理师、授权发明、工商四项 | `stage2-subject/S1`–`S5` |
 | 专精特新豁免 | `stage2-subject/S7-exemptions.md` |
 | 为什么是这个顺序、精确率怎么来的 | `references/ordering.md` |

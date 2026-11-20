@@ -2,16 +2,14 @@
 """文本步：专利公开文本的判据筛查（手段、效果；只看文件本身，不取外部数据）。
 
 用法:
-    python3 scripts/text_screen.py <目录或 PDF/文本 列表...> [--json out.json] [--batch-from-input]
+    python3 scripts/text_screen.py <目录或 PDF/文本 列表...> [--json out.json]
     python3 scripts/text_screen.py 测试用例/某批 --json 结果.json
     python3 scripts/text_screen.py a.pdf b.pdf
-    python3 scripts/text_screen.py 某批 --batch-from-input   # 批次用；送审文件覆盖机构 12 个月全部申请时
 
 输出（stdout，一行一案的 JSON，最后一行是汇总）:
     pub / applicant / agency / app_date / title
     means   {"hit": bool, "clauses": [...], "notes": [...]}
     effect  {"hit": bool, "clauses": [...], "notes": [...]}
-    batch   {"state": "hit|miss|unevaluated", "note": str}   命中即直接定非正常（批次先于文本）
     verdict 非正常 | 存疑 | 正常   硬证据单判、软证据须与第十六条同时成立（见 thresholds.md）
     hints   复核提示（结构案/仅缺验证数据，需人工看附图）
 
@@ -338,43 +336,11 @@ def month_index(s: str) -> int | None:
         return None
 
 
-def batch_judge(cases: list[dict], from_input: bool) -> dict:
-    """批次判据。from_input=True 表示送审文件覆盖该机构 12 个月全部申请。"""
-    if not from_input:
-        return {"state": "unevaluated",
-                "note": "送审文件不等于机构当月全量，须按 `stage2-subject/S0-batch.md` 用代理机构代码查该月全部申请"}
-    groups: dict = {}
-    for c in cases:
-        if not c["agency"] or not c["app_date"]:
-            continue
-        groups.setdefault(c["agency"], []).append(c)
-    def mark(sub: list[dict], why: str) -> None:
-        apps = {c["applicant"] for c in sub}
-        cite = sum(1 for c in sub if c["bg_cite"] >= 1) / len(sub)
-        bg = sum(1 for c in sub if c["bg_len"] >= 400) / len(sub)
-        if cite >= T["cite_ratio"] or bg >= T["bg_ratio"]:
-            return
-        why = why.format(n=len(sub), app=len(apps), cite=cite, bg=bg)
-        for c in sub:
-            c.setdefault("_batch", why)
-
-    for key, lst in groups.items():
-        months = [month_index(c["app_date"]) for c in lst if month_index(c["app_date"]) is not None]
-        if not months:
-            continue
-        # 第二十条：12 个月累计口径
-        for i in range(min(months), max(months) + 2):
-            sub = [c for c in lst if i <= (month_index(c["app_date"]) or -1) < i + 12]
-            if len(sub) >= T["year_n"] and len({c["applicant"] for c in sub}) >= T["year_app"]:
-                mark(sub, "第二十条：12 个月 {n} 件、{app} 家申请人，引用 {cite:.0%}、长背景 {bg:.0%}")
-    return {"state": "evaluated", "note": "以送审文件为全量口径"}
-
-
 HARD_CLAUSES = ("第十二条（结构堆砌）", "第十条（功能性模块）")
 
 
 def verdict_of(c: dict) -> tuple[str, list[str]]:
-    """文本三档：非正常 / 存疑 / 正常。批次命中优先，直接定非正常。
+    """文本三档：非正常 / 存疑 / 正常。
 
     硬证据（第十二条、第十条）单独成立即非正常；其余手段条款属软证据，须与第十六条同时成立。
     单一软证据或单一缺验证只记存疑，交主体步用主体事实判决。
@@ -386,8 +352,6 @@ def verdict_of(c: dict) -> tuple[str, list[str]]:
     soft = bool(hits) and not hard
     effect = c["effect"]["hit"]
 
-    if c.get("batch", {}).get("state") == "hit":
-        return "非正常", ["批次判据成立"]
     if hard:
         if any("第十二条" in h for h in hits):
             hints.append("结构案：核对附图、装配关系与实物，确认后再定")
@@ -402,8 +366,7 @@ def verdict_of(c: dict) -> tuple[str, list[str]]:
         return "存疑", hints
     if c.get("util"):
         return "存疑", ["实用新型无手段命中：按标准列存疑，交主体步"]
-    if c.get("batch", {}).get("state") != "hit":
-        hints.append("批次未命中该机构：结论须跑 T23/T25/T26 后才能落正常")
+    hints.append("结论须跑 T23/T25/T26 后才能落正常")
     return "正常", hints
 
 
@@ -422,8 +385,6 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("paths", nargs="+")
     ap.add_argument("--json", help="把逐案结果写入该文件")
-    ap.add_argument("--batch-from-input", action="store_true",
-                    help="送审文件覆盖该机构当月全部申请时，用本批文件算批次")
     args = ap.parse_args()
 
     files = collect(args.paths)
@@ -444,8 +405,6 @@ def main() -> int:
         f["effect"] = effect_judge(f)
         cases.append(f)
 
-    batch_judge(cases, args.batch_from_input)
-
     summary = {"非正常": 0, "存疑": 0, "正常": 0}
     rows = []
     for c in cases:
@@ -456,9 +415,6 @@ def main() -> int:
             "agency": c["agency"], "app_date": c["app_date"], "util": c["util"],
             "refs": c["c1_refs"], "exp": c["exp"],
             "means": c["means"], "effect": c["effect"],
-            "batch": {"state": "hit", "note": c.get("_batch", "")} if c.get("_batch") else
-                     {"state": "miss" if args.batch_from_input else "unevaluated",
-                      "note": "" if args.batch_from_input else "需查机构 12 个月全量"},
             "verdict": v, "hints": hints,
         }
         rows.append(row)

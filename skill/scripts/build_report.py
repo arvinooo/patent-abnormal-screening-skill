@@ -40,10 +40,8 @@ def short_reason(case: dict) -> str:
         parts.append(SHORT.get(c, c))
     if parts:
         return "；".join(parts)
-    if case.get("batch", {}).get("state") == "hit":
-        return "仅批次一项成立，文本层面未见其他异常"
     if case.get("verdict") == "待核":
-        return "文本两项均未命中，批次与主体未核"
+        return "文本两项均未命中，主体未核"
     return "—"
 
 

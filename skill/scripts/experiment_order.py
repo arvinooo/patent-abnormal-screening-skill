@@ -7,7 +7,7 @@
 标签来自目录归属，不来自文件夹名：--pos 里的 PDF 全部按非正常计，--neg 全部按正常计。
 "正常"目录若包含"非正常"目录里的同一公开号，自动按非正常计（两批重叠时以正例为准）。
 
-输出四段：语料概况、去重键、文本条款精确率、批次覆盖。
+输出四段：语料概况、去重键、文本条款精确率、调参扫描。
 报告解释见 references/ordering.md。
 """
 from __future__ import annotations
@@ -99,50 +99,6 @@ def main() -> int:
         if not is_neg:
             print(f"  {c:32s} 正 {n:4d}  反 {cl[(c, True)]:3d}")
 
-    g = collections.defaultdict(list)
-    for r in pos + neg:
-        if r["ag"]:
-            g[r["ag"]].append(r)
-    def bg(r: dict) -> str:
-        _, _, d = TS.split_sections(TS.read_text(r["path"]))
-        m = re.search(r"背景技术", d)
-        if not m:
-            return ""
-        tail = d[m.end():]
-        e = re.search(r"发明内容|发明概述|技术方案|要解决的技术问题|附图说明", tail)
-        return tail[:e.start()] if e else tail[:2000]
-
-    def text_conds(v: list[dict]) -> tuple[float, float]:
-        bgs = [bg(r) for r in v]
-        bgs = [x for x in bgs if x]
-        if not bgs:
-            return 1.0, 1.0
-        cite = sum(1 for x in bgs if re.search(r"CN\s?\d{6,}|公开号|专利号", x)) / len(bgs)
-        long = sum(1 for x in bgs if len(re.sub(r"\s|\[\d+\]", "", x)) >= 400) / len(bgs)
-        return cite, long
-
-    hit = set()
-    for k, v in g.items():
-        if len(v) < 30 or len({x["app"] for x in v if x["app"]}) < 15:
-            continue
-        cite, long = text_conds(v)
-        flag = "命中" if cite < 0.20 and long < 0.50 else "不符"
-        print(f"  机构 {k[:22]:24s} {len(v):3d} 件 {len({x['app'] for x in v if x['app']}):3d} 家 "
-              f"引文 {cite:.0%} 长背景 {long:.0%} → {flag}")
-        if flag == "命中":
-            hit.add(k)
-    print(f"批次命中机构 {len(hit)} 家")
-    bat = [r for r in pos + neg if r["ag"] in hit]
-    print(f"  覆盖正例 {sum(1 for r in bat if r in pos)}/{len(pos)}  反例 {sum(1 for r in bat if r in neg)}/{len(neg)}")
-
-    tail = [r for r in pos + neg if r["ag"] not in hit]
-    sus = [r for r in tail if TS.means_judge(r["f"])["hit"] or TS.effect_judge(r["f"])["hit"]]
-    tp = sum(1 for r in sus if r in pos)
-    print(f"尾部 {len(tail)} 件（正例 {sum(1 for r in tail if r in pos)}、"
-          f"申请人 {len({r['app'] for r in tail if r['app']})}）："
-          f"文本可疑 {len(sus)}（正例 {tp}，精确 {tp / max(1, len(sus)):.0%}），"
-          f"可疑申请人 {len({r['app'] for r in sus if r['app']})}")
-
     print("\n=== 调参：效果护栏")
 
     def guard(f: dict, mode: str) -> bool:
@@ -175,15 +131,13 @@ def main() -> int:
 
         rate(f"硬判：{'/'.join(hard)}", judge)
 
-    print("\n=== 三档结论（text_screen.verdict_of，批次按样内命中机构置 hit）")
+    print("\n=== 三档结论（text_screen.verdict_of）")
     def verdict(r: dict) -> str:
-        state = "hit" if r["ag"] in hit else "unevaluated"
         v, _ = TS.verdict_of({"means": TS.means_judge(r["f"]),
-                              "effect": TS.effect_judge(r["f"]),
-                              "batch": {"state": state}})
+                              "effect": TS.effect_judge(r["f"])})
         return v
 
-    for scope, rows in (("全语料", pos + neg), ("批次外", [r for r in pos + neg if r["ag"] not in hit])):
+    for scope, rows in (("全语料", pos + neg),):
         g = collections.Counter((verdict(r), "正" if r in pos else "反") for r in rows)
         line = "  ".join(f"{v} {g[(v, '正')]}正/{g[(v, '反')]}反" for v in ("非正常", "存疑", "正常"))
         tp, fp = g[("非正常", "正")], g[("非正常", "反")]
