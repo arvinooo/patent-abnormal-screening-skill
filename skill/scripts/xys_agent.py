@@ -99,14 +99,24 @@ def _tab(sid: str) -> str:
 
 
 def _ready(sid: str, tid: str) -> None:
-    """页面首次只渲染框架，表格不出现；刷新一次再等 form。"""
-    for attempt in range(3):
-        code = ("(()=>{const f=document.querySelector('form');"
-                "return JSON.stringify({form:!!f});})()")
-        if INCO.js(code, sid, tid).get("form"):
-            return
-        INCO.js("(()=>{location.reload();return 1;})()", sid, tid)
-        time.sleep(8)
+    """页面首次只渲染框架；刷新最多 3 次，仍不出现 form 就重新导航再来一轮。
+
+    实测失败态是「白框架」或登录页：前者重导航可恢复，后者只能报未登录。
+    """
+    code = ("(()=>{const f=document.querySelector('form');"
+            "const login=/login|passport/i.test(location.href);"
+            "return JSON.stringify({form:!!f,login:login,url:location.href});})()")
+    for rnd in range(2):
+        for _ in range(3):
+            d = INCO.js(code, sid, tid)
+            if d.get("form"):
+                return
+            if d.get("login"):
+                raise INCO.IncoError("香橼树未登录（页面跳登录）：%s" % d.get("url"))
+            INCO.js("(()=>{location.reload();return 1;})()", sid, tid)
+            time.sleep(8)
+        INCO.js("(()=>{location.href=%s;return 1;})()" % __import__("json").dumps(XYS), sid, tid)
+        time.sleep(6)
     raise INCO.IncoError("香橼树月度页未就绪（form 未出现）")
 
 
@@ -240,8 +250,14 @@ def main(argv=None) -> int:
     ap.add_argument("--anchor", help="窗口锚点=本案申请日 YYYY-MM-DD（默认今天）")
     ap.add_argument("--years", help="只查指定年份，逗号分隔，如 2024,2025")
     ap.add_argument("--no-cache", action="store_true", help="不吃缓存，强制重查")
+    ap.add_argument("--agency", help="本案代理机构；不含「云嘉」时本维直接记 na，不开浏览器")
     a = ap.parse_args(argv)
     use_cache = not a.no_cache
+    if a.agency is not None and "云嘉" not in a.agency:
+        print(json.dumps({"agent": a.name, "status": "na", "value": None,
+                          "note": "跨所案件：香橼树统计页只有本所名录，本维不可评估",
+                          "agency": a.agency}, ensure_ascii=False, indent=1))
+        return 0
     try:
         if a.years:
             out = {"agent": a.name, "status": "ok",

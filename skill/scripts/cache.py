@@ -24,14 +24,14 @@ import time
 
 CACHE = os.environ.get("PATENT_CACHE_DIR", "cache")
 NS = ("company", "company_rd", "company_honor", "agent_month", "inventor",
-      "inventor_identity", "xys_month", "prior_art", "prior_claims", "other")
+      "inventor_identity", "xys_month", "prior_art", "prior_claims", "granted", "other")
 
 # 每个命名空间的当前数据口径（schema 版本）。
 # 缓存命中必须同时满足：口径一致（_schema 相同且 _valid 不为 False）+ 在有效期内。
 # 口径对不上 = 未命中，一律重查，查到再写回。
 SCHEMA = {"company": 1, "company_rd": 1, "company_honor": 1, "agent_month": 2,
           "inventor": 1, "inventor_identity": 1, "xys_month": 1,
-          "prior_art": 1, "prior_claims": 1, "other": 1}
+          "prior_art": 1, "prior_claims": 1, "granted": 1, "other": 1}
 
 
 def _path(ns):

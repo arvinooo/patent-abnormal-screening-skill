@@ -523,6 +523,49 @@ def granted_invention(app: str, base_date: str) -> dict:
             "stat": stat, "rows": r.get("rows") or []}
 
 
+def granted_invention_batch(items: list[tuple[str, str]], chunk: int = 10,
+                            max_pages: int = 10) -> dict:
+    """多申请人的授权发明批量计数（T23 提速）。
+
+    items = [(申请人, 基准日)]。每个申请人只要「到基准日为止的发明授权文本数」。
+    做法：一条 `AP=(A) OR AP=(B) ...` 检索，行内 pub 尾码 B（发明授权公告）且
+    申请日 ≤ 该申请人基准日 → 计 1。检索失败、或条数超过翻页上限时回退单人查询，
+    保证与 `granted_invention()` 同口径。
+    """
+    out: dict = {}
+    clean = [(a, (d or "").replace("-", "")[:8]) for a, d in items if a]
+    for i in range(0, len(clean), chunk):
+        part = clean[i:i + chunk]
+        maxbase = max((d for _, d in part if d), default="")
+        if not maxbase:
+            import datetime as dt
+            maxbase = dt.date.today().strftime("%Y%m%d")
+        # 括号必须包住 OR 组：否则 AND 只作用于最后一家，其余家不受日期窗口限制
+        expr = "(" + " OR ".join(f"AP=({a})" for a, _ in part) + f") AND AD=[19850101 TO {maxbase}]"
+        r = search(expr, all_pages=True, page_size=100, max_pages=max_pages)
+        count = r.get("count")
+        if r.get("error") or count is None or count > max_pages * 100:
+            for a, d in part:
+                g = granted_invention(a, d)
+                out[a] = {"applicant": a, "base_date": d,
+                          "granted_invention": g.get("granted_invention"),
+                          "mode": "single", "error": g.get("error")}
+            continue
+        per: dict = {a: 0 for a, _ in part}
+        for row in r.get("rows") or []:
+            pub = row.get("pub") or ""
+            ad = (row.get("app_date") or "").replace("-", "")[:8]
+            for a, d in part:
+                if a not in (row.get("applicants") or []):
+                    continue
+                if pub.endswith("B") and ad and d and ad <= d:
+                    per[a] += 1
+        for a, d in part:
+            out[a] = {"applicant": a, "base_date": d, "granted_invention": per[a],
+                      "mode": "batch", "expr": expr, "rows": len(r.get("rows") or [])}
+    return out
+
+
 def inventor_patents(name: str, start: str, end: str) -> dict:
     """发明人滚动窗口下的专利：按申请号去重后的记录 + 申请人。"""
     expr = f"IN=({name}) AND AD=[{start} TO {end}]"

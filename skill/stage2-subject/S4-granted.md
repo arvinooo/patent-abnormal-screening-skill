@@ -25,6 +25,12 @@
 | 基准日 | **本案申请日**；本案未公开、无申请日 → 退化为查询日，报告写明 |
 | 件数门槛 | ≥1 件即可 |
 
+**批量取数**（10 家一条检索式，比逐家单查快约 2 倍；口径相同）：
+
+```bash
+python3 scripts/inco_granted.py --json apps.json     # [{"applicant":"…","base_date":"2025-08-14"}, …]
+```
+
 **检索式**（字段码见 `data-sources.md` §8）：
 
 ```text

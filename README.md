@@ -38,11 +38,12 @@ skill/                     ← 就是正在用的那个 skill 目录，可以原
     ├── build_report.py
     ├── extract_pdf.py
     ├── cache.py
+    ├── company_lookup.py   第二层企业资质批量取数（去重/跳过/缓存/积分熔断）
     ├── inco_login.py
     ├── inco_client.py
     ├── inco_inventor.py
-    ├── xys_agent.py
-    └── bsk_helper.py
+    ├── inco_granted.py     T23 授权发明批量查
+    └── xys_agent.py
 
 docs/                      ← 仓库根，与 skill/非正常判定标准.md 同一份（匿名版）
 └── 非正常判定标准.md      判定条文（六章二十七条，面向律师与审核人员）
