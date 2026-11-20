@@ -103,9 +103,11 @@ python3 scripts/text_screen.py <某批 PDF 目录> --json 结果.json [--workers
 # 有清单时合并（PDF 已有的字段不覆盖，只补空）
 python3 scripts/load_list.py <清单.xlsx> --merge 结果.json -o 合并.json
 
-# 第一层跨案：按申请人成组，人读标题判拆分型，重合率按 cross-case.md 的算法算
+# 第一层跨案：自动分组 + 标题相似度 + 正文 20 字重合率，人读标题确认产品线
+python3 scripts/cross_case.py --cases 合并.json --dir <PDF目录> -o 跨案.json
 # 第二层：只对 verdict=存疑 的案子跑 S1–S7
-python3 scripts/subject_inventor.py --cases 合并.json -o 发明人.json   # T20/T21 批量：一个会话、团队锚定、写 facts
+python3 scripts/subject_run.py --cases 合并.json -o 终版.json          # 第二层一键：工商 → T23 → T20 → 定案
+python3 scripts/subject_inventor.py --cases 合并.json -o 发明人.json   # 只跑 T20（subject_run 会调用它）
 python3 scripts/company_lookup.py --apps-file 申请人.json            # 工商四项：默认天眼查；--source qcc/auto 可切
 python3 scripts/inco_granted.py --json 申请人基准日.json       # T23 批量查（10 家一条检索式）
 python3 scripts/xys_agent.py <代理师> --anchor <申请日> --agency "<代理机构>"   # 跨所直接记 na，不开浏览器

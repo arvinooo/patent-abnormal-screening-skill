@@ -49,6 +49,7 @@ def main(argv=None) -> int:
     ap.add_argument("--base-date", help="统一基准日 YYYY-MM-DD（与 --apps 搭配）")
     ap.add_argument("--chunk", type=int, default=10, help="每批申请人数量，默认 10")
     ap.add_argument("--no-cache", action="store_true", help="不吃缓存，强制重查")
+    ap.add_argument("--cache-only", action="store_true", help="只读缓存，未命中记 null 不查")
     a = ap.parse_args(argv)
 
     items: list[dict] = []
@@ -73,10 +74,19 @@ def main(argv=None) -> int:
         seen.add(key)
         hit = None if a.no_cache else _get(ap_name, base)
         if hit:
-            results.append(dict(hit, source="cache"))
+            rec = dict(hit)
+            rec.setdefault("applicant", ap_name)
+            rec.setdefault("base_date", base)
+            rec["source"] = "cache"
+            results.append(rec)
         else:
             todo.append(key)
 
+    if todo and a.cache_only:
+        for key in todo:
+            results.append({"applicant": key[0], "base_date": key[1],
+                            "granted_invention": None, "source": "cache-miss"})
+        todo = []
     if todo:
         batch = INCO.granted_invention_batch(todo, chunk=a.chunk)
         for key in todo:
