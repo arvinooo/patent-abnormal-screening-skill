@@ -115,9 +115,12 @@ def main(argv=None) -> int:
         no_co = bool(g["ipcs"])
         try:
             r = INV.fetch_one(name, g["anchor"], list(g["team"]),
-                             applicant=g["applicant"], no_co=no_co)
+                             applicant=g["applicant"], no_co=no_co, ipc=g["ipcs"])
             records = r.get("records") or []
-            kept, dedupe_mode = _dedupe(records, g["ipcs"], g["team"])
+            if r.get("ipc_filter"):
+                kept, dedupe_mode = records, "ipc-expr"
+            else:
+                kept, dedupe_mode = _dedupe(records, g["ipcs"], g["team"])
             orgs = sorted({x for rec in kept for x in (rec.get("applicants") or [])})
             results.append({"inventor": name, "anchor": g["anchor"], "n": len(kept),
                             "raw": len(records), "dedupe": dedupe_mode,

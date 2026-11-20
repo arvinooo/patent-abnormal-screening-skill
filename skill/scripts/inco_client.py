@@ -463,12 +463,14 @@ def wait_ready(timeout: float = 30.0, sid: str | None = None, tid: str | None = 
     return False
 
 
-def search(expr: str, wait: float = 10.0, all_pages: bool = False,
+def search(expr: str, wait: float | None = None, all_pages: bool = False,
            page_size: int = 100, max_pages: int = 10) -> dict:
     """跑一次表达式检索，返回条数、左侧统计、结果行。
 
     all_pages=True 时把每页调到 page_size 并翻页取完（上限 max_pages 页）。
     """
+    if wait is None:
+        wait = float(os.environ.get("INCO_WAIT", "6"))
     _ensure_once()
     sid = session()
     tid = tab(sid)
@@ -480,10 +482,10 @@ def search(expr: str, wait: float = 10.0, all_pages: bool = False,
     time.sleep(wait)
     r = _read_result(expr, sid, tid)
     # incoPat 检索是异步渲染：条数或「无结果」出现前重试
-    for i in range(6):
+    for i in range(3):
         if r.get("count") is not None:
             break
-        time.sleep(4)
+        time.sleep(2)
         r = _read_result(expr, sid, tid)
     rows = [parse_row(x) for x in (r.get("rows") or [])]
     if all_pages:

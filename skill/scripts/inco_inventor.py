@@ -74,12 +74,23 @@ def _collect(expr: str) -> dict:
 
 
 def fetch_one(name: str, anchor: str | None, co: list[str],
-              applicant: str = "", cap: int = 300, no_co: bool = False) -> dict:
+              applicant: str = "", cap: int = 300, no_co: bool = False,
+              ipc: list[str] | None = None) -> dict:
     start, end = _window(anchor)
     win = f"AD=[{start} TO {end}]"
     others = [x for x in co if x and x != name]
-    # 一次检索同时拿条数：原先为取 count 先跑一遍同表达式，等于每次多花一次浏览器检索
-    base = _collect(f"IN=({name}) AND {win}")
+    # 把本案 IPC 写进检索式：条数就是剔重名后的件数，免去翻页取全记录
+    filtered = False
+    ipc = [x[:4] for x in (ipc or []) if x][:4]
+    if no_co and ipc:
+        cond = " OR ".join(f"IPC=({x})" for x in ipc)
+        base = _collect(f"IN=({name}) AND {win} AND ({cond})")
+        if base.get("total_raw") == 0 and not base.get("error"):
+            base = _collect(f"IN=({name}) AND {win}")     # 前 4 位太窄，回退全量再本地剔
+        elif base.get("total_raw") is not None and not base.get("error"):
+            filtered = True
+    else:
+        base = _collect(f"IN=({name}) AND {win}")
     total = base.get("total_raw")
     if total is None or base.get("error"):
         return {"inventor": name, "window": [start, end], "count": None,
@@ -142,6 +153,7 @@ def fetch_one(name: str, anchor: str | None, co: list[str],
         "anchor": anchor or dt.date.today().isoformat(),
         "expr": rec["expr"], "total_raw": total, "stat": rec["stat"],
         "count": len(records), "records": records, "mode": "full",
+        "ipc_filter": filtered,
         "common_name": name in COMMON_NAMES, "errors": [],
         "_source": "incoPat 结果行（按申请号去重）",
     }
