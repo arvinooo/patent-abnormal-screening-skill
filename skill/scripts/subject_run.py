@@ -57,6 +57,9 @@ def _dims(case: dict, company: dict, granted: dict) -> tuple[list[str], bool]:
     g = granted.get(ap) or {}
     if g.get("granted_invention") == 0:
         hits.append("授权发明专利为 0")
+    elif g.get("granted_invention") == 1 and g.get("same_party") is False:
+        pub = g.get("single_pub") or ""
+        hits.append(f"唯一一件授权发明{f'（{pub}）' if pub else ''}的当前权利人已不是申请人")
     insured = _num(reg.get("参保人数"))
     if insured is not None and insured < 3:
         hits.append(f"参保 {insured} 人")
@@ -189,6 +192,9 @@ def main(argv=None) -> int:
             pending.append("工商数据没取到")
         if not waived and appn and not SCHOOL.search(appn) and appn not in granted:
             pending.append("授权发明专利没查")
+        gg = granted.get(appn) or {}
+        if gg.get("granted_invention") == 1 and gg.get("same_party") is None:
+            pending.append("唯一一件授权发明的权利人未核")
         if pending:
             x["verdict"], x["reason"] = "待核", "；".join(pending)
             out_rows.append(x)

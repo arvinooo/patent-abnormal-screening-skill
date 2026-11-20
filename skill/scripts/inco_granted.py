@@ -42,6 +42,39 @@ def _set(applicant: str, base: str, payload: dict) -> None:
     cache._save(NS, store)
 
 
+def _check_single_party(results: list[dict]) -> None:
+    """授权数恰好 1 的申请人：核对唯一一件的申请人(原始)与当前权利人是否一致。
+
+    不一致 → 这件属于受让/转出，不能算作该申请人的研发积累（T23 视为 0）。
+    核对结果写回缓存字段：single_pub / same_party / party_error。
+    """
+    for rec in results:
+        if rec.get("granted_invention") != 1:
+            continue
+        if rec.get("same_party") is not None:
+            continue
+        ap = rec.get("applicant") or ""
+        pub = rec.get("single_pub") or ""
+        if not pub:
+            rows = rec.get("rows")
+            if isinstance(rows, list) and rows:
+                pub = rows[0].get("pub") or ""
+        if not pub and ap and rec.get("base_date"):
+            g = INCO.granted_invention(ap, rec["base_date"])   # 补取结果行拿公开号
+            rows = g.get("rows") or []
+            pub = (rows[0].get("pub") or "") if rows else ""
+        if not pub:
+            rec["party_error"] = "唯一授权发明的公开号没取到"
+            continue
+        p = INCO.patent_party(pub, ap)
+        rec["single_pub"] = pub
+        rec["same_party"] = p.get("same")
+        if p.get("error"):
+            rec["party_error"] = p["error"]
+        if rec.get("same_party") is not None:
+            _set(ap, rec.get("base_date") or "", rec)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="批量查授权发明专利（T23）")
     ap.add_argument("--json", help="JSON 文件：[{applicant, base_date}, …]")
@@ -95,6 +128,8 @@ def main(argv=None) -> int:
             rec["source"] = "live"
             _set(key[0], key[1], rec)
             results.append(rec)
+
+    _check_single_party(results)
 
     print(json.dumps({"results": results,
                       "summary": {"total": len(results),

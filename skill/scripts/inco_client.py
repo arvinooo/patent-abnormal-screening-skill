@@ -572,6 +572,22 @@ def granted_invention_batch(items: list[tuple[str, str]], chunk: int = 10,
     return out
 
 
+def patent_party(pub: str, applicant: str, wait: float | None = None) -> dict:
+    """核对单件专利：申请人(原始) 与 当前权利人 是否都是该申请人。
+
+    incoPat 字段：AP-OR=申请人(原始)、PATENTEE=当前权利人。
+    返回 {same: True/False/None, expr, error}；None 表示检索没返回。
+    """
+    expr = f"PN=({pub}) AND AP-OR=({applicant}) AND PATENTEE=({applicant})"
+    r = search(expr, wait=wait)
+    n = r.get("count")
+    if n is None:
+        return {"pub": pub, "applicant": applicant, "same": None,
+                "expr": expr, "error": r.get("error") or "检索未返回条数"}
+    return {"pub": pub, "applicant": applicant, "same": n >= 1,
+            "expr": expr, "count": n, "error": None}
+
+
 def inventor_patents(name: str, start: str, end: str) -> dict:
     """发明人滚动窗口下的专利：按申请号去重后的记录 + 申请人。"""
     expr = f"IN=({name}) AND AD=[{start} TO {end}]"
