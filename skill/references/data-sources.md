@@ -342,6 +342,9 @@ python3 scripts/build_report.py 结果.json -o 报告.md --title 批次名
 | 国际 IPC 分类 | `IPC` | |
 | CPC 分类 | `CPC` | |
 | 申请日 | `AD` | `AD=[20251110 TO 20261109]` |
+| 申请人(原始) | `AP-OR` | T23 授权数=1 时核对权利归属 |
+| 当前权利人 | `PATENTEE` | `PN=(公开号) AND PATENTEE=(申请人)` |
+| 申请人或受让人 | `APAEE` | 含受让取得的情形 |
 | 公开（公告）日 | `PD` | |
 | 法律状态文字 | `LG` | |
 | 专利有效性 | `STATUS` | |
