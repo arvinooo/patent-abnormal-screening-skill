@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 
 DISCLAIMER = "**本报告仅供参考，不作为非正常判断的唯一依据。**"
 
@@ -27,7 +28,11 @@ SHORT = {
     "第十二条（结构堆砌）": "排在前的权利要求列了 {n} 个部件，彼此只写装配关系，没有参数、没有实施例",
     "第十四条（技术问题不落地）": "通篇是管理、评价、考核这类事项，落不到设备状态或工艺参数",
     "第十六条（缺少验证结构）": "说明书没有性能测试表，也没有测试结果的数值",
+    "第十六条（仅引用在先文献）": "说明书只引用了在先文献，没有性能测试表，也没有测试数据",
+    "第九条第一项（通用动作）": "排在前的权利要求只有一串动作，没写用什么算、算到什么数",
 }
+
+CLAUSE = re.compile(r"第[一二三四五六七八九十]+条[^；;）]*[）)]")
 
 
 def short_reason(case: dict) -> str:
@@ -36,11 +41,12 @@ def short_reason(case: dict) -> str:
         return case["reason"]
     parts = []
     for c in case.get("means", {}).get("clauses", []):
-        parts.append(SHORT.get(c, c).replace("{n}", str(case.get("refs", ""))))
+        parts.append(SHORT.get(c, CLAUSE.sub("", c) or "文本存在撰写缺陷")
+                     .replace("{n}", str(case.get("refs", ""))))
     for c in case.get("effect", {}).get("clauses", []):
-        parts.append(SHORT.get(c, c))
+        parts.append(SHORT.get(c, CLAUSE.sub("", c) or "缺少验证数据"))
     if parts:
-        return "；".join(parts)
+        return "；".join(parts[:2])   # 一行一句：最多两条，避免表格被撑爆
     if case.get("verdict") == "待核":
         return "缺取数信息，尚未核实（报告未填原因）"
     if case.get("verdict") == "存疑":

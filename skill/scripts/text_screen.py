@@ -264,6 +264,8 @@ def features(t: str) -> dict:
     m = re.search(r"\(72\)发明人([\s\S]{0,220}?)(?:\(74\)|\(51\)|\(54\)|$)", h)
     names = _split_inventors(m.group(1)) if m else []
     f["inventors"] = names
+    m = re.search(r"\(51\)Int\.Cl\.\s*([A-H]\d{2}[A-Z])", h)
+    f["ipc"] = m.group(1) if m else ""
     m = re.search(r"专利代理师\s*([\u4e00-\u9fff]{2,4})", h)
     f["agent"] = m.group(1) if m else ""
     m = re.search(r"\((?:71|73)\)(?:申请人|专利权人)(.*?)(?=\(72\)|\(74\)|\(51\))", h)
@@ -472,7 +474,7 @@ def _case_one(p: str) -> dict:
         hints.append("发明人未取到：PDF 著录项与清单都没有")
     return {
         "file": f["file"], "pub": f["pub"], "title": f["title"], "applicant": f["applicant"],
-        "agency": f["agency"], "agent": f["agent"], "inventors": f["inventors"],
+        "agency": f["agency"], "agent": f["agent"], "inventors": f["inventors"], "ipc": f["ipc"],
         "app_date": f["app_date"], "util": f["util"],
         "refs": f["c1_refs"], "exp": f["exp"],
         "means": f["means"], "effect": f["effect"],
