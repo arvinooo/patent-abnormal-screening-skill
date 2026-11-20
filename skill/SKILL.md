@@ -94,8 +94,14 @@ description: Use when the user supplies Chinese patent application text (PDF 公
 ## 六、怎么跑
 
 ```bash
+# 清单（随批附带的 xlsx/xls）：先读，把 PDF 里缺的申请人/发明人/代理机构补上
+python3 scripts/load_list.py <清单.xlsx> -o 清单.json
+
 # 第一层：一条命令出三档，逐案一行 JSON（默认 8 进程；PDF 正文不落缓存，避免占盘）
 python3 scripts/text_screen.py <某批 PDF 目录> --json 结果.json [--workers 8]
+
+# 有清单时合并（PDF 已有的字段不覆盖，只补空）
+python3 scripts/load_list.py <清单.xlsx> --merge 结果.json -o 合并.json
 
 # 第一层跨案：按申请人成组，人读标题判拆分型，重合率按 cross-case.md 的算法算
 # 第二层：只对 verdict=存疑 的案子跑 S1–S7

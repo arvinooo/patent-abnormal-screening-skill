@@ -43,6 +43,7 @@ skill/                     ← 就是正在用的那个 skill 目录，可以原
     ├── inco_client.py
     ├── inco_inventor.py
     ├── inco_granted.py     T23 授权发明批量查
+    ├── load_list.py        案件清单（xlsx/xls）读取与字段补齐
     └── xys_agent.py
 
 docs/                      ← 仓库根，与 skill/非正常判定标准.md 同一份（匿名版）

@@ -11,6 +11,19 @@
 
 不在这两类里的检索式（申请人授权发明量、代理师代理量、专精特新荣誉）按 `stage2-subject/S1`–`S7` 只作背景记录。
 
+## 0.6 案件清单（xlsx / xls，可补字段）
+
+```bash
+python3 scripts/load_list.py <清单.xlsx|.xls> -o 清单.json
+python3 scripts/load_list.py <清单.xlsx> --merge 筛查结果.json -o 合并.json
+```
+
+- 按列名识别，不要求列序。认得的列：标题/专利名称、申请人/专利权人、公开号、申请号、申请日、发明人、代理机构、代理人、PDF链接、专利类型。
+- 只补空字段：PDF/Word 已有的以文件为准，清单不覆盖。
+- 匹配键：公开号 > 申请号 > 标题 > 文件名。
+- 发明人栏可能带身份证号，读取时剥掉；申请人栏可能带「申请人」字样，读取时去掉。
+- 依赖：openpyxl（xlsx）、xlrd（旧版 xls）。
+
 ## 0. PDF 提取（免费，第一步）
 
 ```bash
