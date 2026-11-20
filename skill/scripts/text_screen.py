@@ -343,8 +343,8 @@ def verdict_of(c: dict) -> tuple[str, list[str]]:
     """文本三档：非正常 / 存疑 / 正常。
 
     硬证据（第十二条、第十条）单独成立即非正常；其余手段条款属软证据，须与第十六条同时成立。
-    单一软证据或单一缺验证只记存疑，交主体步用主体事实判决。
-    实测见 references/ordering.md §9：硬判只留这两条，精确 85%。
+    单一软证据或单一缺验证只记存疑，进第二层用主体事实判决。
+    实测见 references/ordering.md §3：硬判只留这两条，精确 94%。
     """
     hints = []
     hits = c["means"]["clauses"]
@@ -359,14 +359,14 @@ def verdict_of(c: dict) -> tuple[str, list[str]]:
     if soft and effect:
         return "非正常", hints
     if c["effect"].get("guarded"):
-        return "存疑", ["仅引用在先文献、无验证数据：交主体步"]
+        return "存疑", ["仅引用在先文献、无验证数据：进第二层"]
     if soft or effect:
         if effect and not soft:
             hints.append("仅缺验证数据：核对是否属于机械结构无参数的情形")
         return "存疑", hints
     if c.get("util"):
-        return "存疑", ["实用新型无手段命中：按标准列存疑，交主体步"]
-    hints.append("结论须跑 T23/T25/T26 后才能落正常")
+        return "存疑", ["实用新型无手段命中：按标准列存疑，进第二层"]
+    hints.append("文本无命中，按正常提交；主体未核")
     return "正常", hints
 
 
