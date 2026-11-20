@@ -106,7 +106,7 @@ python3 scripts/load_list.py <清单.xlsx> --merge 结果.json -o 合并.json
 # 第一层跨案：按申请人成组，人读标题判拆分型，重合率按 cross-case.md 的算法算
 # 第二层：只对 verdict=存疑 的案子跑 S1–S7
 python3 scripts/subject_inventor.py --cases 合并.json -o 发明人.json   # T20/T21 批量：一个会话、团队锚定、写 facts
-python3 scripts/company_lookup.py --apps-file 申请人.json      # T23–T27 与专精特新：去重、跳过院校/自然人、缓存优先、积分耗尽即停
+python3 scripts/company_lookup.py --apps-file 申请人.json --source auto   # 工商四项：企查查优先，积分不足自动切天眼查
 python3 scripts/inco_granted.py --json 申请人基准日.json       # T23 批量查（10 家一条检索式）
 python3 scripts/xys_agent.py <代理师> --anchor <申请日> --agency "<代理机构>"   # 跨所直接记 na，不开浏览器
 

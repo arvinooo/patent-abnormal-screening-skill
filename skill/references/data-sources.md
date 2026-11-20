@@ -50,7 +50,18 @@ python3 scripts/extract_pdf.py --force <a.pdf>             # 改了脚本后强�
 
 ### 企查查（主源）
 
-额度（2026-11 官方口径）：注册送 500 积分（30 天）；每日送 100（当日有效）；充值 1 元 = 10 积分；同一企业每月最多扣 100 积分、满额当月免费。
+额度（2026-11 官方口径，agent.qcc.com/guide）：
+- 注册送 500 积分（30 天有效）
+- 每日赠送（当日有效）：普通 100 / 企查查 VIP 150 / SVIP 200
+- 充值：1 元 = 10 积分，套餐 50／100／500 元，积分 2 年有效
+- 同一主体每月封顶：企业 100 积分、个体工商户 20、董监高 100
+- 会员价（人工查询）：个人 VIP 388 元/年、SVIP 1800 元/年；**会员只加每日赠送 50/100 积分，不替代 API 充值**
+
+批量取数（积分不足自动切天眼查）：
+
+```bash
+python3 scripts/company_lookup.py --apps-file 申请人.json --source auto   # auto | qcc | tyc
+```
 
 ```bash
 # 取 Key（一次性）：https://agent.qcc.com/guide 注册 → 右上头像 →「获取我的 API KEY」
@@ -71,6 +82,9 @@ MCP 直连（备选）：
 开放平台 410（无参保，别买错）/ 736（含 InsuredCount，6 元/次）只在批量离线时考虑。
 
 ### 天眼查（备选，免费额度小）
+
+额度（天眼AI 正式期，2026-09-01 起）：Free 10 次/天、100 次/月；VIP 100 次/天、1000 次/月；SVIP 1000 次/天、10000 次/月。会员价：VIP 360 元/年、SVIP 1800 元/年。
+`company_lookup.py --source auto` 在企查查 402 后自动切本源，字段映射：`socialStaffNum`→参保人数、`industry`→国标行业、`businessScope`→经营范围、`tags`→荣誉标签（不含专精特新认定，按未豁免处理）。
 
 ```bash
 npx -y tyc-cli@latest login --no-block      # OAuth 设备码，打印 URL + 验证码

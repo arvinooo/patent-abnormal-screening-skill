@@ -43,21 +43,61 @@ def _qcc(args: list[str], timeout: int = 60) -> dict:
         return {"_raw": (r.stdout + r.stderr)[:200]}
 
 
+TYC = ["npx", "-y", "tyc-cli@latest", "company", "registration-info"]
+
+
+def _tyc_reg(name: str, timeout: int = 90) -> dict:
+    """天眼查工商登记（免费/会员共用同一额度）。字段名与企查查同义，共用缓存与报告。"""
+    r = subprocess.run(TYC + [name, "--compact"], capture_output=True, text=True,
+                       timeout=timeout)
+    try:
+        d = json.loads(r.stdout)
+    except ValueError:
+        return {"_error": "天眼查调用失败", "_raw": (r.stdout + r.stderr)[:200]}
+    base = (d.get("sources") or {}).get("base") or d.get("base") or {}
+    if not base:
+        return {"_error": "天眼查无此主体", "_raw": (r.stdout + r.stderr)[:200]}
+    tags = base.get("tags") or ""
+    if isinstance(tags, list):
+        tags = ";".join(map(str, tags))
+    return {
+        "企业名称": base.get("name") or name,
+        "参保人数": base.get("socialStaffNum"),
+        "国标行业": base.get("industry"),
+        "经营范围": base.get("businessScope"),
+        "成立日期": (base.get("estiblishTime") or "")[:10],
+        "企业类型": base.get("companyOrgType"),
+        "法定代表人": base.get("legalPersonName"),
+        "登记状态": base.get("regStatus"),
+        "tags": tags,
+        "_source": "天眼查",
+    }
+
+
 def _honor_level(honor: dict) -> dict:
     """只认国家级小巨人、省级专精特新；其他荣誉不算豁免。"""
     txt = json.dumps(honor, ensure_ascii=False)
     if "积分余额不足" in txt or "402" in txt[:80]:
         return {"error": "credit_exhausted"}
-    hits = re.findall(r'"名称"\s*:\s*"([^"]*专精特新[^"]*)"', txt)
-    levels = re.findall(r'"级别"\s*:\s*"([^"]*)"', txt)
+    items = honor.get("honors") if isinstance(honor, dict) else None
+    if not isinstance(items, list):
+        # 兼容直接返回荣誉数组/其它形状
+        items = honor if isinstance(honor, list) else []
+    names, levels = [], []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        n, lv = str(it.get("名称") or ""), str(it.get("级别") or "")
+        names.append(n)
+        levels.append(lv)
     level = ""
-    for h, lv in zip(hits, levels or [""] * len(hits)):
-        if "小巨人" in h and "国家级" in lv:
+    for n, lv in zip(names, levels):
+        if "小巨人" in n and "国家级" in lv:
             level = "国家级小巨人"
             break
-        if "专精特新中小企业" in h and "省级" in lv:
+        if "专精特新中小企业" in n and "省级" in lv:
             level = "省级专精特新"
-    return {"waived": bool(level), "level": level, "names": hits, "levels": levels}
+    return {"waived": bool(level), "level": level, "names": names, "levels": levels}
 
 
 def _reg_brief(reg: dict) -> dict:
@@ -94,6 +134,8 @@ def main(argv=None) -> int:
     ap.add_argument("--apps-file", help="JSON 文件：申请人字符串数组")
     ap.add_argument("--apps", help="逗号分隔的申请人")
     ap.add_argument("--no-cache", action="store_true")
+    ap.add_argument("--source", choices=("qcc", "tyc", "auto"), default="auto",
+                    help="qcc=企查查；tyc=天眼查；auto=企查查积分不足时自动切天眼查")
     ap.add_argument("--max-age", type=int, default=90)
     a = ap.parse_args(argv)
 
@@ -107,7 +149,8 @@ def main(argv=None) -> int:
 
     seen, results = set(), []
     live = cached = 0
-    dead = False
+    dead = a.source == "tyc"          # 直接指定天眼查：跳过企查查
+    tyc_dead = False
     for name in apps:
         if not name or name in seen:
             continue
@@ -127,10 +170,34 @@ def main(argv=None) -> int:
             results.append({"applicant": name, "status": "ok", "source": "cache",
                             "reg": _reg_brief(reg), "honor": _honor_level(hon)})
             continue
-        if dead:
-            results.append({"applicant": name, "status": "credit_exhausted",
-                            "note": "本批积分已耗尽，未调用"})
+        def via_tyc():
+            """天眼查取数；额度不足返回 credit_exhausted 记录。"""
+            nonlocal live, tyc_dead
+            if tyc_dead:
+                return {"applicant": name, "status": "credit_exhausted",
+                        "note": "本批额度已耗尽，未调用"}
+            reg = _tyc_reg(name)
+            live += 1
+            if reg.get("_error"):
+                tyc_dead = True
+                return {"applicant": name, "status": "credit_exhausted",
+                        "note": "天眼查额度不足或调用失败，未取到工商数据", "reg": reg}
+            _store("company", name, reg)
+            hc = None if a.no_cache else _cached("company_honor", name, a.max_age)
+            if hc:
+                honor = _honor_level(hc)
+                honor["note"] = "荣誉取自企查查缓存"
+            else:
+                honor = {"waived": "专精特新" in (reg.get("tags") or ""),
+                         "level": "", "names": [], "levels": [],
+                         "note": "天眼查 tags 未含专精特新认定，按未豁免处理"}
+            return {"applicant": name, "status": "ok", "source": "tyc",
+                    "reg": _reg_brief(reg), "honor": honor}
+
+        if a.source == "tyc" or dead:
+            results.append(via_tyc())
             continue
+
         if reg is None:
             reg = _qcc(["qcc", "company", "get_company_registration_info", name, "--json"])
             live += 1
@@ -141,13 +208,14 @@ def main(argv=None) -> int:
             live += 1
             if "积分余额不足" in json.dumps(hon, ensure_ascii=False):
                 dead = True
-        if not dead:
-            _store("company", name, reg or {})
-            if hon:
-                _store("company_honor", name, hon)
+        if dead:                       # 本次刚发现积分不足 → 立即切天眼查，不留空转
+            results.append(via_tyc())
+            continue
+        _store("company", name, reg or {})
+        if hon:
+            _store("company_honor", name, hon)
         results.append({"applicant": name,
-                        "status": "credit_exhausted" if dead else
-                                  ("missing" if "无匹配项" in (reg or {}) else "ok"),
+                        "status": "missing" if "无匹配项" in (reg or {}) else "ok",
                         "source": "live", "reg": _reg_brief(reg or {}),
                         "honor": _honor_level(hon or {})})
 
