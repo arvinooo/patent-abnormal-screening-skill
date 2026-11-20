@@ -4,9 +4,10 @@
 用法:
     python3 scripts/build_report.py 结果.json [-o 报告.md] [--title 批次名]
 
-报告结构固定：免责句 → 件数合计 → 非正常（名称/申请人/原因）→ 正常（名称/申请人）→ 待核（差什么）。
+报告结构固定：免责句 → 件数合计 → 非正常（不过）→ 正常（过）→ 待核（为什么核不了）。
 
 写法：每案一行，原因一句话，写文档里看到的事实；不写条款号、不写内部代号、不带证据原文。
+待核必须写清是哪一类：缺字段（哪个字段）、积分不足（哪个平台、哪几项没查到）、查无此人（哪个平台、查谁）。
 输入字段：title / applicant / verdict / reason（有 reason 时优先用），means / effect / batch 用于兜底生成原因。
 对外表述：正常 → 正常；存疑、待核 → 待核。
 """
@@ -41,7 +42,9 @@ def short_reason(case: dict) -> str:
     if parts:
         return "；".join(parts)
     if case.get("verdict") == "待核":
-        return "文本两项均未命中，主体未核"
+        return "缺取数信息，尚未核实（报告未填原因）"
+    if case.get("verdict") == "存疑":
+        return "主体核查未完成，需补充信息后复核"
     return "—"
 
 
@@ -62,7 +65,7 @@ def main() -> int:
     L.append(f"合计 {len(rows)} 件：非正常 {len(bad)} 件，正常 {len(ok)} 件，待核 {len(doubt)} 件。")
     L.append("")
 
-    L.append(f"## 一、非正常（{len(bad)} 件）")
+    L.append(f"## 一、非正常，不建议提交（{len(bad)} 件）")
     L.append("")
     if bad:
         L.append("| # | 名称 | 申请人 | 原因 |")
@@ -73,7 +76,7 @@ def main() -> int:
         L.append("无。")
     L.append("")
 
-    L.append(f"## 二、正常（{len(ok)} 件）")
+    L.append(f"## 二、正常，可以提交（{len(ok)} 件）")
     L.append("")
     if ok:
         L.append("| # | 名称 | 申请人 |")
@@ -84,10 +87,10 @@ def main() -> int:
         L.append("无。")
     L.append("")
 
-    L.append(f"## 三、待核（{len(doubt)} 件）")
+    L.append(f"## 三、待核，需补充信息（{len(doubt)} 件）")
     L.append("")
     if doubt:
-        L.append("| # | 名称 | 申请人 | 差什么 |")
+        L.append("| # | 名称 | 申请人 | 待核原因 |")
         L.append("|---|---|---|---|")
         for i, r in enumerate(doubt, 1):
             L.append(f"| {i} | {r.get('title') or r['pub']} | {r.get('applicant') or '—'} | {short_reason(r)} |")
