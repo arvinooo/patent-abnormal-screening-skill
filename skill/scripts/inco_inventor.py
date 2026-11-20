@@ -143,6 +143,8 @@ def main(argv):
     ap.add_argument("--co", default="", help="本案其余发明人，逗号分隔（用于交集剔重名）")
     ap.add_argument("--applicant", default="", help="本案申请人（单发明人、常见名溢出时用它锚定）")
     ap.add_argument("--out", help="写出的 JSON 文件")
+    ap.add_argument("--facts", action="store_true",
+                    help="把件数写进缓存 facts（键 T20|姓名|窗口），不落原始记录")
     a = ap.parse_args(argv[1:])
 
     names = [x.strip() for x in (a.names or a.name or "").split(",") if x.strip()]
@@ -155,6 +157,18 @@ def main(argv):
     for n in names:
         print(f"[取数] {n} …", file=sys.stderr)
         results.append(fetch_one(n, a.anchor, co, applicant=a.applicant))
+
+    if a.facts:
+        import cache
+        for r in results:
+            w = r.get("window") or []
+            n = r.get("count")
+            if n is None or len(w) != 2:
+                continue
+            cache._save("facts", dict(cache._load("facts"), **{
+                f"T20|{r['inventor']}|{w[0].replace('-', '')}-{w[1].replace('-', '')}": {
+                    "_schema": cache.SCHEMA.get("facts", 1), "n": n,
+                    "org_groups": None, "_fetched": dt.date.today().isoformat()}}))
 
     out = {"anchor": a.anchor or dt.date.today().isoformat(),
            "co_inventors": co, "results": results,

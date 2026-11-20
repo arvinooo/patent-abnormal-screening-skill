@@ -2,6 +2,12 @@
 
 只记"判据口径"和"脚本行为"的变化，不记测试数据。
 
+## 2026-11-20（第二层缓存只存数字）
+
+- `cache.py` 新增 `facts` 命名空间：键 `维度|对象|窗口`，值只有判定要用的数字（T20 件数 + T21 组数、T22 代理量），90 天。
+- `inco_inventor.py --facts`、`xys_agent.py --facts` 取完数直接写 facts，不再落原始记录；`xys_agent` 只在 status=ok 时写，partial 不写。
+- `data-sources.md` 增 §12a 键规范；S1/S2/S3 写明"默认只写数字、复核才写原始记录"。
+
 ## 2026-11-20（PDF 识别不落缓存）
 
 - `text_screen.py` 去掉 `cache/pdftext` 读写：正文每次重抽，仍用进程池（11-13 批 296 份 8.4s）。

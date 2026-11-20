@@ -6,7 +6,7 @@
 
 - 取数：`python3 scripts/xys_agent.py <姓名> --anchor <本案申请日>`（封装页面操作，见 `data-sources.md` §2.1）。
 - 命名空间 `agent_month`，键 `姓名|窗口锚点`，有效期 1 天；整年分月表存 `xys_month`（`姓名|年`，30 天），窗口求和本地算，同一代理师换锚点不重查。
-- 存滚动 12 个月口径：`value` / `window` / `months` / `ytd_2026`。
+- 存滚动 12 个月口径数字：`facts` 命名空间 `T22|姓名|窗口起-止` → `{"value": 总量}`；原始分月表另存 `agent_month` / `xys_month`，仅复核时写。
 - 命中条件：口径一致且在有效期内；不满足则重新取数，取完写回。
 
 ## 1 判定

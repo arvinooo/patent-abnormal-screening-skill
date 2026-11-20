@@ -389,8 +389,30 @@ qcc operation get_honor_info "<申请人全名>" --json
 | `inventor_identity` | 发明人 + 本案申请人 | 剔重名结果（保留/剔除 + 理由） | 7 天 |
 | `xys_month` | `姓名\|年` | 香橼树整年分月表：months / total / month_sum | 30 天 |
 | `agent_month` | `姓名\|窗口锚点` | 滚动 12 个月：value / window / months / ytd_2026 / _schema=2 | 1 天 |
+| `facts` | `维度\|对象\|窗口` | **第二层只存数字**：T20 件数 + T21 组数、T22 代理量 | 90 天 |
 | `granted` | `申请人\|基准日` | T23 授权发明件数 + 检索式 + 取数方式 | 90 天 |
 | `pdf` / `docx` | 文件名 | 提取字段 + 全文 | 永久 |
+
+## 12a. 第二层缓存只写数字（facts）
+
+浏览器取数最贵，重复批次应当直接吃数字，不重开窗口。第二层只写「判定要用的那个数」，不写原始记录：
+
+| 维度 | facts 键 | 值 |
+|---|---|---|
+| T20 发明人件数 | `T20\|第一发明人\|窗口起-止` | `{"n": 有效件数, "org_groups": 聚组后机构组数}` |
+| T21 跨机构 | 同上（与 T20 同键，组数一起算） | 用 `org_groups` |
+| T22 代理量 | `T22\|代理师\|窗口起-止` | `{"value": 滚动 12 个月总量}` |
+| T23 授权发明 | `granted` 命名空间 `申请人\|基准日` | `{"granted_invention": n}` |
+
+```bash
+# 查
+python3 scripts/cache.py get facts "T20|田东兴|20241120-20251120" --max-age 90
+# 存（拿到数字后立刻写回）
+python3 scripts/cache.py set facts "T20|田东兴|20241120-20251120" --json '{"n": 3, "org_groups": 1}'
+```
+
+原始记录（records/申请号/共同发明人）只在**要复核剔重名**时才写 `inventor` 命名空间；命中 facts 就不再拉记录。
+口径或阈值未变时 facts 直接复用；要复核时重新取数。
 
 ## 主体步数据来源速查
 

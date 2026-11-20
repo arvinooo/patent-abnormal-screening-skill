@@ -251,6 +251,7 @@ def main(argv=None) -> int:
     ap.add_argument("--years", help="只查指定年份，逗号分隔，如 2024,2025")
     ap.add_argument("--no-cache", action="store_true", help="不吃缓存，强制重查")
     ap.add_argument("--agency", help="本案代理机构；不含「云嘉」时本维直接记 na，不开浏览器")
+    ap.add_argument("--facts", action="store_true", help="把总量写进缓存 facts（键 T22|姓名|窗口）")
     a = ap.parse_args(argv)
     use_cache = not a.no_cache
     if a.agency is not None and "云嘉" not in a.agency:
@@ -268,6 +269,14 @@ def main(argv=None) -> int:
             out = window_total(a.name, anchor, use_cache)
     except INCO.IncoError as e:
         out = {"agent": a.name, "status": "error", "error": str(e)}
+    if a.facts and out.get("status") == "ok" and out.get("value") is not None and out.get("window"):
+        import cache
+        w = out["window"]
+        store = cache._load("facts")
+        store[f"T22|{a.name}|{w[0]}-{w[1]}"] = {
+            "_schema": cache.SCHEMA.get("facts", 1), "value": out["value"],
+            "_fetched": dt.date.today().isoformat()}
+        cache._save("facts", store)
     print(json.dumps(out, ensure_ascii=False, indent=1))
     return 0 if out.get("status") in ("ok", "partial") else 1
 
