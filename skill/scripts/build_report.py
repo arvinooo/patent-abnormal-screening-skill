@@ -53,6 +53,7 @@ def main() -> int:
     ap.add_argument("json")
     ap.add_argument("-o", "--out")
     ap.add_argument("--title", default="非正常申请筛查报告")
+    ap.add_argument("--note", default="", help="批次说明（一行，印在合计下面）")
 
     args = ap.parse_args()
 
@@ -63,6 +64,9 @@ def main() -> int:
 
     L = [f"# {args.title}", "", DISCLAIMER, ""]
     L.append(f"合计 {len(rows)} 件：非正常 {len(bad)} 件，正常 {len(ok)} 件，待核 {len(doubt)} 件。")
+    if args.note:
+        L.append("")
+        L.append(args.note)
     L.append("")
 
     L.append(f"## 一、非正常，不建议提交（{len(bad)} 件）")

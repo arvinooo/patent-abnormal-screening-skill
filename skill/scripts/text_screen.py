@@ -7,14 +7,14 @@
     python3 scripts/text_screen.py a.pdf b.pdf
 
 输出（stdout，一行一案的 JSON，最后一行是汇总）:
-    pub / applicant / agency / app_date / title
+    pub / applicant / agency / agent / inventors / app_date / title
     means   {"hit": bool, "clauses": [...], "notes": [...]}
     effect  {"hit": bool, "clauses": [...], "notes": [...]}
     verdict 非正常 | 存疑 | 正常   硬证据单判、软证据须与第十六条同时成立（见 thresholds.md）
     hints   复核提示（结构案/仅缺验证数据，需人工看附图）
 
 判据编号与 `thresholds.md` 对应；改阈值改那里，本文件同步改常量。
-依赖: pypdf（缺失时回退 pdfplumber）
+依赖: pypdf（缺失时回退 pdfplumber）；docx 用 python-docx；首页发明人取不到时用 pdfplumber 重读第 1 页
 """
 from __future__ import annotations
 
@@ -73,6 +73,14 @@ def norm(t: str) -> str:
 def read_text(path: str) -> str:
     if path.lower().endswith(".txt"):
         return open(path, encoding="utf-8", errors="ignore").read()
+    if path.lower().endswith(".docx"):
+        import docx
+        d = docx.Document(path)
+        parts = [p.text for p in d.paragraphs]
+        for tb in d.tables:
+            for row in tb.rows:
+                parts.extend(c.text for c in row.cells)
+        return "\n".join(parts)
     try:
         from pypdf import PdfReader
         r = PdfReader(path)
@@ -168,6 +176,12 @@ def claims_of(claims: str) -> list[tuple[int, str]]:
             for i, (p, n) in enumerate(best)]
 
 
+def _split_inventors(raw: str) -> list[str]:
+    s = re.sub(r"\d{17}[\dXx]", "", raw or "")
+    parts = [x.strip(" ，,、;；") for x in re.split(r"[，,、;；\s\u3000]+", s)]
+    return [x for x in parts if 1 < len(x) <= 6 and re.fullmatch(r"[\u4e00-\u9fff·A-Za-z]+", x)]
+
+
 # ---------------------------------------------------------------- 特征
 def features(t: str) -> dict:
     hdr, claims, desc = split_sections(t)
@@ -247,6 +261,11 @@ def features(t: str) -> dict:
             blk = blk[:j]
         ag = blk.replace("(74)专利代理机构", "").split("专利代理师")[0]
     f["agency"] = ag
+    m = re.search(r"\(72\)发明人([\s\S]{0,220}?)(?:\(74\)|\(51\)|\(54\)|$)", h)
+    names = _split_inventors(m.group(1)) if m else []
+    f["inventors"] = names
+    m = re.search(r"专利代理师\s*([\u4e00-\u9fff]{2,4})", h)
+    f["agent"] = m.group(1) if m else ""
     m = re.search(r"\((?:71|73)\)(?:申请人|专利权人)(.*?)(?=\(72\)|\(74\)|\(51\))", h)
     ap = ""
     if m:
@@ -391,17 +410,57 @@ def collect(paths: list[str]) -> list[str]:
     for p in paths:
         if os.path.isdir(p):
             out += sorted(glob.glob(os.path.join(p, "**", "*.pdf"), recursive=True))
+            out += sorted(glob.glob(os.path.join(p, "**", "*.docx"), recursive=True))
             out += sorted(glob.glob(os.path.join(p, "**", "*.txt"), recursive=True))
         else:
             out.append(p)
     return out
 
 
+def _meta_fallback(path: str) -> dict:
+    """pypdf 会把相邻汉字粘在一起，首页著录项取不到发明人时用 pdfplumber 单独重读第 1 页。"""
+    if not path.lower().endswith(".pdf"):
+        return {}
+    try:
+        import pdfplumber
+        with pdfplumber.open(path) as pdf:
+            t = pdf.pages[0].extract_text() or ""
+    except Exception:
+        return {}
+    h = t.replace("（", "(").replace("）", ")")
+    out: dict = {}
+    m = re.search(r"\(72\)发明(?:人|设计人)\s*([\s\S]{0,260}?)(?:\(74\)|\(51\)|\(54\)|$)", h)
+    if m:
+        out["inventors"] = _split_inventors(m.group(1))
+    m = re.search(r"(?:专利代理师|代理人)\s*([\u4e00-\u9fff]{2,4})", h)
+    if m:
+        out["agent"] = m.group(1)
+    m = re.search(r"\((?:71|73)\)(?:申请人|专利权人)\s*([\s\S]{0,200}?)(?:\(72\)|\(74\)|\(51\)|$)", h)
+    if m:
+        out["applicant"] = re.sub(r"\s+", "", m.group(1))
+    return out
+
+
 def _case_one(p: str) -> dict:
     """单件：抽正文 → 特征 → 判据 → 三档。进程池里跑，返回值必须可 pickle。"""
     f = features(read_text(p))
+    if not f["inventors"] or not f["applicant"]:
+        for k, v in _meta_fallback(p).items():
+            if not f.get(k) and v:
+                f[k] = v
     f["file"] = os.path.basename(p)
-    f["pub"] = re.sub(r"\.(pdf|txt)$", "", f["file"])
+    f["pub"] = re.sub(r"\.(pdf|txt|docx)$", "", f["file"])
+    if p.lower().endswith(".docx") and (not f["title"] or not f["applicant"]):
+        # 常州分所稿件命名：申请人+专利类型+发明名称.docx
+        stem = os.path.splitext(f["file"])[0]
+        parts = [x.strip() for x in stem.split("+") if x.strip()]
+        if len(parts) >= 3:
+            f["applicant"] = f["applicant"] or parts[0]
+            f["title"] = f["title"] or parts[-1]
+            if "实用新型" in parts[1]:
+                f["util"] = True
+            elif "发明" in parts[1]:
+                f["util"] = False
     f["means"] = means_judge(f)
     f["effect"] = effect_judge(f)
     v, hints = verdict_of(f)
@@ -409,9 +468,12 @@ def _case_one(p: str) -> dict:
         hints.append("抽取不完整：正文不足 2000 字，结论不可信")
     if not f["title"] or not f["applicant"]:
         hints.append("首页著录项未取到：标题或申请人缺")
+    if not f["inventors"]:
+        hints.append("发明人未取到：PDF 著录项与清单都没有")
     return {
         "file": f["file"], "pub": f["pub"], "title": f["title"], "applicant": f["applicant"],
-        "agency": f["agency"], "app_date": f["app_date"], "util": f["util"],
+        "agency": f["agency"], "agent": f["agent"], "inventors": f["inventors"],
+        "app_date": f["app_date"], "util": f["util"],
         "refs": f["c1_refs"], "exp": f["exp"],
         "means": f["means"], "effect": f["effect"],
         "verdict": v, "hints": hints,

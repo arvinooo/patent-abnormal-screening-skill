@@ -74,13 +74,14 @@ def _collect(expr: str) -> dict:
 
 
 def fetch_one(name: str, anchor: str | None, co: list[str],
-              applicant: str = "", cap: int = 300) -> dict:
+              applicant: str = "", cap: int = 300, no_co: bool = False) -> dict:
     start, end = _window(anchor)
     win = f"AD=[{start} TO {end}]"
     others = [x for x in co if x and x != name]
-    base = INCO.search(f"IN=({name}) AND {win}")
-    total = base.get("count")
-    if total is None:
+    # 一次检索同时拿条数：原先为取 count 先跑一遍同表达式，等于每次多花一次浏览器检索
+    base = _collect(f"IN=({name}) AND {win}")
+    total = base.get("total_raw")
+    if total is None or base.get("error"):
         return {"inventor": name, "window": [start, end], "count": None,
                 "common_name": name in COMMON_NAMES,
                 "error": base.get("error") or "检索未返回条数"}
@@ -113,10 +114,10 @@ def fetch_one(name: str, anchor: str | None, co: list[str],
                 "total_raw": total, "common_name": True if name in COMMON_NAMES else None,
                 "note": "常见名溢出且无共同发明人/申请人可锚定，保持存疑"}
 
-    rec = _collect(f"IN=({name}) AND {win}")
+    rec = base
     records = rec["records"]
     # 未溢出：仍按共同发明人交集标 co_inventors，便于逐条核对
-    for other in others:
+    for other in ([] if no_co else others):
         r2 = _collect(f"IN=({name}) AND IN=({other}) AND {win}")
         hit = {x.get("app_no") or x.get("pub") for x in r2["records"]}
         for r in records:
@@ -125,6 +126,9 @@ def fetch_one(name: str, anchor: str | None, co: list[str],
                 r.setdefault("co_inventors", [])
                 if other not in r["co_inventors"]:
                     r["co_inventors"].append(other)
+    if no_co and others:
+        for r in records:
+            r.setdefault("co_inventors", [])
     return {
         "inventor": name, "window": [start, end],
         "anchor": anchor or dt.date.today().isoformat(),
@@ -143,6 +147,8 @@ def main(argv):
     ap.add_argument("--co", default="", help="本案其余发明人，逗号分隔（用于交集剔重名）")
     ap.add_argument("--applicant", default="", help="本案申请人（单发明人、常见名溢出时用它锚定）")
     ap.add_argument("--out", help="写出的 JSON 文件")
+    ap.add_argument("--no-co", action="store_true",
+                    help="跳过逐共同发明人交集检索（每条省一次浏览器检索），剔重名退化为 IPC 兜底")
     ap.add_argument("--facts", action="store_true",
                     help="把件数写进缓存 facts（键 T20|姓名|窗口），不落原始记录")
     a = ap.parse_args(argv[1:])
@@ -156,7 +162,7 @@ def main(argv):
     results = []
     for n in names:
         print(f"[取数] {n} …", file=sys.stderr)
-        results.append(fetch_one(n, a.anchor, co, applicant=a.applicant))
+        results.append(fetch_one(n, a.anchor, co, applicant=a.applicant, no_co=a.no_co))
 
     if a.facts:
         import cache
