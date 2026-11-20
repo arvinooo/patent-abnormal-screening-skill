@@ -171,10 +171,12 @@ def claims_of(claims: str) -> list[tuple[int, str]]:
 # ---------------------------------------------------------------- 特征
 def features(t: str) -> dict:
     hdr, claims, desc = split_sections(t)
+    nchar = len(norm(t))
     cl = claims_of(claims)
     c1 = claim1_of(claims)
     dep = [s for _, s in cl[1:]]
     f: dict = {}
+    f["nchar"] = nchar
     f["claim_n"] = len(cl)
     f["c1_refs"] = len(re.findall(r"[（(]\s*\d{1,3}\s*[）)]", c1))
     f["c1_act"] = len(set(re.findall(ACT, c1)))
@@ -251,7 +253,7 @@ def features(t: str) -> dict:
         parts = [x for x in re.split(r"地址[^专]*?(?=申请人|专利权人|$)", m.group(1)) if x.strip()]
         ap = ";".join(x.strip() for x in parts)
     f["applicant"] = ap
-    m = re.search(r"\(54\)发明名称(.+?)(?:\(57\)|摘要)", h)
+    m = re.search(r"\(54\)(?:发明|实用新型|外观设计)?名称(.+?)(?:\(57\)|摘要)", h)
     if not m:
         m = DOC_TITLE.search(hdr)
     f["title"] = m.group(1)[:60] if m else ""
@@ -279,8 +281,8 @@ def means_judge(f: dict) -> dict:
         hits.append("第九条第一项（通用动作）")
     if f["c1_proc"] >= T["proc_n"] and f["c1_step"] and f["c1_param"] < 3 \
             and f["c1_refs"] < 4 and f["c1_struct"] < 3:
-        broad = True
-        hits.append("第九条第二项（工艺动作）")
+        # 工艺动作是正常化工/材料案的常见写法，单独命中精确率过低，只记提示
+        notes.append("第九条第二项（工艺动作）：仅提示，不计入分档")
     if f["c1_unit"] >= T["unit_n"] and f["model_claim"] + f["model_core"] == 0 and f["exp"] == 0:
         broad = True
         hits.append("第十条（功能性模块）")
@@ -370,6 +372,20 @@ def verdict_of(c: dict) -> tuple[str, list[str]]:
     return "正常", hints
 
 
+FAM = re.compile(r"(CN\d{6,})([A-Z])")
+
+
+def dedupe_files(files: list[str]) -> list[str]:
+    """同一申请号的公开文本与授权公告只算一件：有授权公告（B）取 B，否则取先出现的一份。"""
+    keep: dict = {}
+    for p in files:
+        m = FAM.search(os.path.basename(p))
+        key = m.group(1) if m else p
+        if key not in keep or (m and m.group(2) == "B"):
+            keep[key] = p
+    return sorted(keep.values())
+
+
 def collect(paths: list[str]) -> list[str]:
     out = []
     for p in paths:
@@ -387,7 +403,7 @@ def main() -> int:
     ap.add_argument("--json", help="把逐案结果写入该文件")
     args = ap.parse_args()
 
-    files = collect(args.paths)
+    files = dedupe_files(collect(args.paths))
     if not files:
         print("没有找到 PDF 或 txt", file=sys.stderr)
         return 2
@@ -409,6 +425,10 @@ def main() -> int:
     rows = []
     for c in cases:
         v, hints = verdict_of(c)
+        if c["nchar"] < 2000:
+            hints.append("抽取不完整：正文不足 2000 字，结论不可信")
+        if not c["title"] or not c["applicant"]:
+            hints.append("首页著录项未取到：标题或申请人缺")
         summary[v] += 1
         row = {
             "file": c["file"], "pub": c["pub"], "title": c["title"], "applicant": c["applicant"],
