@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""专利公开文本 PDF -> 结构化字段（带缓存，避免重复解析）。
+"""专利公开文本 PDF -> 结构化字段。
 
 用法:
-    python3 scripts/extract_pdf.py <file.pdf> [--force]
+    python3 scripts/extract_pdf.py <file.pdf>
     python3 scripts/extract_pdf.py <file.pdf> ... # 逐个输出 JSON 行
 
 输出: 每个 PDF 一个 JSON 对象（stdout，一行一个）。
-全文落盘 cache/pdf/<key>.txt，字段落盘 cache/pdf/<key>.json。
-命中缓存时不重新解析（--force 强制重解析）。
+正文不落盘：PDF 识别结果体积大，不做缓存（盘空间优先）。
 
 字段: pub/app_no/app_date/applicants/inventors/agency/agent/ipc/title/abstract/
       claim1/claims/tech_field/pages/text_file
@@ -19,7 +18,6 @@ import os
 import re
 import sys
 
-CACHE = os.environ.get("PATENT_CACHE_DIR", "cache")
 HEAD = {  # 著录项标签 -> 该块的标题文字（解析时剥掉）
     "10": "申请公布号", "43": "申请公布日", "21": "申请号", "22": "申请日",
     "71": "申请人", "73": "专利权人", "72": "发明人", "74": "专利代理机构",
@@ -71,26 +69,12 @@ def _cjk_join(text):
     return re.sub(r"[ \t]{2,}", " ", text)
 
 
-def parse_pdf(path, force=False):
+def parse_pdf(path):
     import pdfplumber
-
-    key = os.path.splitext(os.path.basename(path))[0]
-    os.makedirs(os.path.join(CACHE, "pdf"), exist_ok=True)
-    tfile = os.path.join(CACHE, "pdf", key + ".txt")
-    jfile = os.path.join(CACHE, "pdf", key + ".json")
-
-    if not force and os.path.exists(jfile) and os.path.exists(tfile):
-        with open(jfile, encoding="utf-8") as f:
-            rec = json.load(f)
-        if rec.get("src_size") == os.path.getsize(path):
-            rec["cached"] = True
-            return rec
 
     with pdfplumber.open(path) as pdf:
         pages = [pg.extract_text() or "" for pg in pdf.pages]
     text = "\n".join(pages)
-    with open(tfile, "w", encoding="utf-8") as f:
-        f.write(text)
 
     p1 = pages[0] if pages else ""
     b = _blocks(p1)
@@ -216,24 +200,21 @@ def parse_pdf(path, force=False):
         "title": title, "abstract": abstract,
         "claim1": claim1, "claims": claims,
         "tech_field": tech_field,
-        "pages": len(pages), "text_file": tfile,
+        "pages": len(pages), "text_file": "",
         "src_size": os.path.getsize(path),
     }
-    with open(jfile, "w", encoding="utf-8") as f:
-        json.dump(rec, f, ensure_ascii=False, indent=1)
     return rec
 
 
 def main(argv):
     files = [a for a in argv[1:] if not a.startswith("-")]
-    force = "--force" in argv
     if not files:
         print(__doc__)
         return 2
     ok = 0
     for f in files:
         try:
-            rec = parse_pdf(f, force)
+            rec = parse_pdf(f)
             out = {k: v for k, v in rec.items() if k not in ("claims", "abstract")}
             out["claim_count"] = len(re.findall(r"(?m)^\s*\d+\s*[.．、]\s*", rec["claims"]))
             print(json.dumps(out, ensure_ascii=False))

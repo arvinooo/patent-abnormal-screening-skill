@@ -2,6 +2,12 @@
 
 只记"判据口径"和"脚本行为"的变化，不记测试数据。
 
+## 2026-11-20（PDF 识别不落缓存）
+
+- `text_screen.py` 去掉 `cache/pdftext` 读写：正文每次重抽，仍用进程池（11-13 批 296 份 8.4s）。
+- `extract_pdf.py` 去掉 `cache/pdf` 读写与 `--force`，`text_file` 字段置空。
+- 删除现存 `cache/pdf`（674 份、约 24MB）与 `cache/pdftext`（8.7MB）；`data-sources.md`、`SKILL.md`、`ordering.md` 同步。
+
 ## 2026-11-20（第二层取数提速，判据不变）
 
 - `text_screen.py`：PDF 文本按「路径+大小+mtime」落 `cache/pdftext`，主流程改进程池（默认 min(8,CPU)）。11-13 批 296 份：41s → 9.5s 冷跑、0.6s 热跑；三档输出逐案一致（269 件 114/125/30）。

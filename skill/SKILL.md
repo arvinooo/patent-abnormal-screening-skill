@@ -93,7 +93,7 @@ description: Use when the user supplies Chinese patent application text (PDF 公
 ## 六、怎么跑
 
 ```bash
-# 第一层：一条命令出三档，逐案一行 JSON（默认 8 进程；PDF 文本落 cache/pdftext，重跑不再抽）
+# 第一层：一条命令出三档，逐案一行 JSON（默认 8 进程；PDF 正文不落缓存，避免占盘）
 python3 scripts/text_screen.py <某批 PDF 目录> --json 结果.json [--workers 8]
 
 # 第一层跨案：按申请人成组，人读标题判拆分型，重合率按 cross-case.md 的算法算

@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import argparse
 import glob
-import hashlib
 import json
 import os
 import re
@@ -71,44 +70,17 @@ def norm(t: str) -> str:
     return re.sub(r"[\u3000\s]+", "", t or "")
 
 
-CACHE = os.environ.get("PATENT_CACHE_DIR", "cache")
-TEXT_CACHE = os.path.join(CACHE, "pdftext")
-
-
-def _cache_key(path: str) -> str:
-    st = os.stat(path)
-    raw = f"{os.path.abspath(path)}|{st.st_size}|{int(st.st_mtime)}"
-    return hashlib.md5(raw.encode()).hexdigest() + ".txt"
-
-
 def read_text(path: str) -> str:
-    """读正文；PDF 解析结果按「路径+大小+修改时间」落 cache/pdftext，重跑不再抽一遍。"""
     if path.lower().endswith(".txt"):
         return open(path, encoding="utf-8", errors="ignore").read()
-    key = _cache_key(path)
-    cp = os.path.join(TEXT_CACHE, key)
-    if os.path.exists(cp):
-        try:
-            return open(cp, encoding="utf-8").read()
-        except OSError:
-            pass
     try:
         from pypdf import PdfReader
         r = PdfReader(path)
-        t = "\n".join((pg.extract_text() or "") for pg in r.pages)
+        return "\n".join((pg.extract_text() or "") for pg in r.pages)
     except Exception:
         import pdfplumber
         with pdfplumber.open(path) as pdf:
-            t = "\n".join((pg.extract_text() or "") for pg in pdf.pages)
-    try:
-        os.makedirs(TEXT_CACHE, exist_ok=True)
-        tmp = cp + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fp:
-            fp.write(t)
-        os.replace(tmp, cp)
-    except OSError:
-        pass
-    return t
+            return "\n".join((pg.extract_text() or "") for pg in pdf.pages)
 
 
 def clean_claims(cl: str) -> str:

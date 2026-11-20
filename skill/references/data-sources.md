@@ -20,7 +20,7 @@ python3 scripts/extract_pdf.py --force <a.pdf>             # 改了脚本后强�
 
 输出字段：`pub / app_no / app_date / applicants / inventors / agency / agent / ipc / title / abstract / claim1 / claims / tech_field / pages / text_file`
 
-- 全文落在 `cache/pdf/<文件名>.txt`，字段落在 `cache/pdf/<文件名>.json`；第二次跑同一 PDF 直接命中，不重解析。
+- PDF 正文不落盘：识别结果体积大（本批 674 份约 24MB），每次重抽；盘空间优先，不建 `cache/pdf/`。
 - 已适配：发明申请（(71)申请人）、实用新型（(73)专利权人、(10)授权公告号）、2021 前老文本（(74) 里叫"代理人"）、多申请人（地址块后的"申请人/专利权人"续行）、首页把 IPC 挤进 (71)/(72)/(74) 的排版、著录项用全角括号（（22）（71）（74））。
 - 撰写稿（Word 转 PDF、代理解析导出的纯文本）：无著录项首页、无页脚「权利要求书N页 说明书M页」。文本层按章标题定位：第一处「权利要求书」之后的「1.」为权项起点，「技术领域」为说明书起点；权项页脚写作「权利要求书2」，解析时剥掉。著录项从用户表格取。
 - 撰写稿的类型按正文自称判定：出现「本实用新型」且无「本发明」→ 实用新型；公开文本仍以 (12) 行判定。
@@ -223,7 +223,6 @@ python3 scripts/inco_inventor.py --names "金锐博,王键,张钦崇" --out cach
 | `company` | 申请人全名 | 90 天 | 参保/经营范围/行业/标签/规模 |
 | `agent_month` | `姓名\|窗口锚点` | 1 天 | 滚动 12 个月代理量（value + 窗口 + 分月/年至今拆分） |
 | `inventor` | 第一发明人姓名 | 7 天 | 检索原样 records + total |
-| `pdf` | PDF 文件名 | 永久 | PDF 字段 + 全文 txt（由 `extract_pdf.py` 直接读写 `cache/pdf/`，不走 cache.py） |
 | `other` | 自定义 | — | 杂项（查新相似度、通报线索等） |
 
 ```bash
@@ -391,7 +390,6 @@ qcc operation get_honor_info "<申请人全名>" --json
 | `xys_month` | `姓名\|年` | 香橼树整年分月表：months / total / month_sum | 30 天 |
 | `agent_month` | `姓名\|窗口锚点` | 滚动 12 个月：value / window / months / ytd_2026 / _schema=2 | 1 天 |
 | `granted` | `申请人\|基准日` | T23 授权发明件数 + 检索式 + 取数方式 | 90 天 |
-| `pdftext` | PDF 路径 + 大小 + 修改时间 | 抽取后的纯文本（文本层复用，重跑不再解析） | 永久 |
 | `pdf` / `docx` | 文件名 | 提取字段 + 全文 | 永久 |
 
 ## 主体步数据来源速查
