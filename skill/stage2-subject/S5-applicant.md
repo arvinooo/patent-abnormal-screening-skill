@@ -37,7 +37,7 @@
 ≥10          → 不成立
 ```
 
-取数：企查查 `get_company_registration_info` 的参保人数，缓存 90 天。
+取数：天眼查 `tyc company registration-info` 的 `socialStaffNum`（企查查「参保人数」为备选），缓存 90 天。
 
 注意：社保是年报公示口径，可能滞后；新设未申报会显示 0 或空。查无主体要区分"0 人"和"不在库"——"0 人"按成立记，"不在库"记数据缺失。
 

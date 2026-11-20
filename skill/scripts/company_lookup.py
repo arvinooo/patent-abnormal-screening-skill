@@ -134,8 +134,8 @@ def main(argv=None) -> int:
     ap.add_argument("--apps-file", help="JSON 文件：申请人字符串数组")
     ap.add_argument("--apps", help="逗号分隔的申请人")
     ap.add_argument("--no-cache", action="store_true")
-    ap.add_argument("--source", choices=("qcc", "tyc", "auto"), default="auto",
-                    help="qcc=企查查；tyc=天眼查；auto=企查查积分不足时自动切天眼查")
+    ap.add_argument("--source", choices=("qcc", "tyc", "auto"), default="tyc",
+                    help="tyc=天眼查（默认）；qcc=企查查；auto=企查查优先、积分不足切天眼查")
     ap.add_argument("--max-age", type=int, default=90)
     a = ap.parse_args(argv)
 

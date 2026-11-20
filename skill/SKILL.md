@@ -84,8 +84,8 @@ description: Use when the user supplies Chinese patent application text (PDF 公
 | 查什么 | 平台 | 成本 |
 |---|---|---|
 | 授权发明专利件数 | incoPat | 每申请人 1 次，约 75 秒 |
-| 社保、经营范围、行业 | 企查查 `qcc company get_company_registration_info` | 每申请人 1 次，约 1 秒 |
-| 专精特新荣誉 | 企查查 `qcc operation get_honor_info` | 每申请人 1 次，约 1 秒 |
+| 社保、经营范围、行业 | 天眼查 `tyc company registration-info`（企查查备选） | 每申请人 1 次，约 3 秒 |
+| 专精特新荣誉 | 企查查 `qcc operation get_honor_info`；积分不足则按未豁免 | 每申请人 1 次 |
 | 代理师 12 个月代理量 | 香橼树代理师月度统计 | 每人 1 次 |
 | 发明人名下件数 | incoPat | 每人 1 次，约 75 秒 |
 
@@ -106,7 +106,7 @@ python3 scripts/load_list.py <清单.xlsx> --merge 结果.json -o 合并.json
 # 第一层跨案：按申请人成组，人读标题判拆分型，重合率按 cross-case.md 的算法算
 # 第二层：只对 verdict=存疑 的案子跑 S1–S7
 python3 scripts/subject_inventor.py --cases 合并.json -o 发明人.json   # T20/T21 批量：一个会话、团队锚定、写 facts
-python3 scripts/company_lookup.py --apps-file 申请人.json --source auto   # 工商四项：企查查优先，积分不足自动切天眼查
+python3 scripts/company_lookup.py --apps-file 申请人.json            # 工商四项：默认天眼查；--source qcc/auto 可切
 python3 scripts/inco_granted.py --json 申请人基准日.json       # T23 批量查（10 家一条检索式）
 python3 scripts/xys_agent.py <代理师> --anchor <申请日> --agency "<代理机构>"   # 跨所直接记 na，不开浏览器
 
@@ -126,7 +126,7 @@ python3 scripts/experiment_order.py --pos <非正常样本目录> --neg <正常�
 
 ```text
 PDF 发明人栏为空，清单中也没有发明人信息，发明人件数无法核查
-企查查积分不足，社保人数与经营范围没能取到，企业四项没法判
+天眼查额度不足 / 企查查积分不足，社保人数与经营范围没能取到，企业四项没法判
 香橼树本所名录查无代理师张三，近 12 个月代理量无法核实
 ```
 
