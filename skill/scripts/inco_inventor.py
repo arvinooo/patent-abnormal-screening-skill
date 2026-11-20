@@ -87,7 +87,15 @@ def fetch_one(name: str, anchor: str | None, co: list[str],
                 "error": base.get("error") or "检索未返回条数"}
 
     if total > cap:
-        # 常见名溢出：不拉全量，用交集缩小到可确认同一人的集合
+        # 常见名溢出：no_co 且给了申请人 → 先用申请人锚定，一条检索解决
+        if no_co and applicant:
+            c = _collect(f"AP=({applicant}) AND IN=({name}) AND {win}")
+            return {"inventor": name, "window": [start, end],
+                    "anchor": anchor or dt.date.today().isoformat(),
+                    "total_raw": total, "count": len(c["records"]), "records": c["records"],
+                    "mode": "applicant", "applicant": applicant,
+                    "note": "常见名溢出，按申请人锚定计数"}
+        # 其次用交集缩小到可确认同一人的集合
         if others:
             union: dict = {}
             for other in others:

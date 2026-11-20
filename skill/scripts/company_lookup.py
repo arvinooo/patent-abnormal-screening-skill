@@ -21,7 +21,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import glob
 import re
+import shutil
 import subprocess
 import sys
 
@@ -43,7 +45,30 @@ def _qcc(args: list[str], timeout: int = 60) -> dict:
         return {"_raw": (r.stdout + r.stderr)[:200]}
 
 
-TYC = ["npx", "-y", "tyc-cli@latest", "company", "registration-info"]
+def _tyc_bin() -> list[str]:
+    """优先用已安装/已缓存的 tyc 可执行文件，避免每次 npx 重新解析（慢且要联网）。"""
+    hit = shutil.which("tyc")
+    if hit:
+        return [hit]
+    cached = sorted(glob.glob(os.path.expanduser("~/.npm/_npx/*/node_modules/.bin/tyc")))
+    if cached:
+        return [cached[-1]]
+    return ["npx", "-y", "tyc-cli@latest"]
+
+
+TYC = _tyc_bin() + ["company", "registration-info"]
+
+
+def _tag_honor(tags) -> dict:
+    """天眼查 tags → 专精特新档位。tags 是分号串，含「专精特新中小企业」即省级。"""
+    txt = tags if isinstance(tags, str) else ";".join(map(str, tags or []))
+    level = ""
+    if "小巨人" in txt:
+        level = "国家级小巨人"
+    elif "专精特新中小企业" in txt:
+        level = "省级专精特新"
+    return {"waived": bool(level), "level": level, "names": [], "levels": [],
+            "note": "取自天眼查 tags"}
 
 
 def _tyc_reg(name: str, timeout: int = 90) -> dict:
@@ -102,7 +127,7 @@ def _honor_level(honor: dict) -> dict:
 
 def _reg_brief(reg: dict) -> dict:
     keys = ("企业名称", "参保人数", "国标行业", "经营范围", "成立日期", "企业类型",
-            "法定代表人", "登记状态", "注册资本")
+            "法定代表人", "登记状态", "注册资本", "tags")
     out = {k: reg.get(k) for k in keys if reg.get(k) not in (None, "")}
     if "无匹配项" in reg:
         out["missing"] = True
@@ -188,11 +213,19 @@ def main(argv=None) -> int:
                 honor = _honor_level(hc)
                 honor["note"] = "荣誉取自企查查缓存"
             else:
-                honor = {"waived": "专精特新" in (reg.get("tags") or ""),
-                         "level": "", "names": [], "levels": [],
-                         "note": "天眼查 tags 未含专精特新认定，按未豁免处理"}
+                honor = _tag_honor(reg.get("tags"))
             return {"applicant": name, "status": "ok", "source": "tyc",
                     "reg": _reg_brief(reg), "honor": honor}
+
+        if a.source == "tyc" and not a.no_cache:
+            reg_c = _cached("company", name, a.max_age)
+            if reg_c:
+                hc = _cached("company_honor", name, a.max_age)
+                honor = _honor_level(hc) if hc else _tag_honor(reg_c.get("tags"))
+                cached += 1
+                results.append({"applicant": name, "status": "ok", "source": "cache",
+                                "reg": _reg_brief(reg_c), "honor": honor})
+                continue
 
         if a.source == "tyc" or dead:
             results.append(via_tyc())
